@@ -183,12 +183,16 @@ cmdForm.addEventListener('submit', (ev) => {
 });
 
 // ---------------------------------------------------------------------------
-// Quick command buttons (persisted on server)
+// Commands: instances, templates, recent (persisted on server)
 // ---------------------------------------------------------------------------
 
-const quickRoot = document.getElementById('quick-buttons');
+const instancesRoot = document.getElementById('cmd-instances');
+const templatesRoot = document.getElementById('cmd-templates');
+const recentRoot = document.getElementById('cmd-recent');
 let commandButtons = [];
+let commandRecent = [];
 let editingButtonId = null;
+let dragState = null;
 
 function newButtonId() {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -205,6 +209,20 @@ function escapeHtml(s) {
     .replace(/"/g, '&quot;');
 }
 
+function isTemplate(btn) {
+  return btn.type === 'template';
+}
+
+function splitButtons() {
+  const instances = commandButtons.filter((b) => !isTemplate(b));
+  const templates = commandButtons.filter((b) => isTemplate(b));
+  return { instances, templates };
+}
+
+function mergeButtons(instances, templates) {
+  commandButtons = [...instances, ...templates];
+}
+
 function applyCommandParams(command, paramValues) {
   let out = command;
   Object.entries(paramValues).forEach(([name, value]) => {
@@ -213,29 +231,65 @@ function applyCommandParams(command, paramValues) {
   return out;
 }
 
-function renderQuickButtons() {
-  quickRoot.innerHTML = '';
-  if (!commandButtons.length) {
-    quickRoot.innerHTML = '<p class="muted">暂无快捷按钮，点击「管理」添加。</p>';
+function renderButtonGroup(root, buttons, emptyText) {
+  root.innerHTML = '';
+  if (!buttons.length) {
+    root.innerHTML = `<p class="muted">${emptyText}</p>`;
     return;
   }
-  commandButtons.forEach((btn) => {
+  buttons.forEach((btn) => {
     const el = document.createElement('button');
     el.type = 'button';
     el.textContent = btn.label;
     if (btn.danger) el.classList.add('danger');
-    if (Array.isArray(btn.params) && btn.params.length) {
-      el.title = `含参数：${btn.params.map((p) => p.name).join(', ')}`;
+    if (isTemplate(btn) && btn.params?.length) {
+      el.title = `参数：${btn.params.map((p) => p.name).join(', ')}`;
     }
     el.addEventListener('click', () => runQuickButton(btn));
-    quickRoot.appendChild(el);
+    root.appendChild(el);
   });
+}
+
+function renderRecentList() {
+  recentRoot.innerHTML = '';
+  if (!commandRecent.length) {
+    recentRoot.innerHTML = '<p class="muted">暂无记录，执行模板命令后会出现在这里。</p>';
+    return;
+  }
+  commandRecent.forEach((item) => {
+    const row = document.createElement('div');
+    row.className = 'recent-row';
+    const from = item.template_label
+      ? `<span class="muted recent-from">来自模板：${escapeHtml(item.template_label)}</span>`
+      : '';
+    row.innerHTML = `
+      <div class="recent-info">
+        <code>${escapeHtml(item.command)}</code>
+        ${from}
+      </div>
+      <div class="recent-actions">
+        <button type="button" class="ghost btn-sm" data-action="run">执行</button>
+        <button type="button" class="ghost btn-sm" data-action="save">存为命令</button>
+      </div>`;
+    row.querySelector('[data-action="run"]').addEventListener('click', () => {
+      if (!authenticated) { openLoginModal(); return; }
+      runCommand(item.command);
+    });
+    row.querySelector('[data-action="save"]').addEventListener('click', () => promoteRecent(item));
+    recentRoot.appendChild(row);
+  });
+}
+
+function renderCommandUi() {
+  const { instances, templates } = splitButtons();
+  renderButtonGroup(instancesRoot, instances, '暂无命令，点击「管理」添加。');
+  renderButtonGroup(templatesRoot, templates, '暂无模板，点击「管理」添加。');
+  renderRecentList();
 }
 
 function runQuickButton(btn) {
   if (!authenticated) { openLoginModal(); return; }
-  const params = Array.isArray(btn.params) ? btn.params : [];
-  if (params.length) {
+  if (isTemplate(btn)) {
     openRunModal(btn);
     return;
   }
@@ -246,7 +300,8 @@ function runQuickButton(btn) {
 async function loadCommandButtons() {
   if (!authenticated) {
     commandButtons = [];
-    renderQuickButtons();
+    commandRecent = [];
+    renderCommandUi();
     return;
   }
   try {
@@ -258,9 +313,12 @@ async function loadCommandButtons() {
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const body = await resp.json();
     commandButtons = Array.isArray(body.buttons) ? body.buttons : [];
-    renderQuickButtons();
+    commandRecent = Array.isArray(body.recent) ? body.recent : [];
+    renderCommandUi();
   } catch (e) {
-    quickRoot.innerHTML = `<p class="err">加载快捷按钮失败：${escapeHtml(e)}</p>`;
+    instancesRoot.innerHTML = `<p class="err">加载失败：${escapeHtml(e)}</p>`;
+    templatesRoot.innerHTML = '';
+    recentRoot.innerHTML = '';
   }
 }
 
@@ -281,11 +339,57 @@ async function persistCommandButtons() {
   }
   const body = await resp.json();
   commandButtons = body.buttons || commandButtons;
-  renderQuickButtons();
+  commandRecent = body.recent || commandRecent;
+  renderCommandUi();
+}
+
+async function recordRecent(command, template) {
+  const resp = await fetch('/api/command-buttons/recent', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      command,
+      template_id: template?.id || null,
+      template_label: template?.label || null,
+    }),
+  });
+  if (!resp.ok) return;
+  const body = await resp.json();
+  commandRecent = body.recent || commandRecent;
+  renderRecentList();
+}
+
+async function promoteRecent(item) {
+  if (!authenticated) { openLoginModal(); return; }
+  const label = window.prompt('命令名称', item.template_label || item.command.slice(0, 40));
+  if (label === null) return;
+  try {
+    const resp = await fetch('/api/command-buttons/promote', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ recent_id: item.id, label: label.trim() || undefined }),
+    });
+    if (resp.status === 401) {
+      applyAuthState(false);
+      openLoginModal();
+      return;
+    }
+    if (!resp.ok) {
+      const body = await resp.json().catch(() => ({}));
+      throw new Error(body.detail || `HTTP ${resp.status}`);
+    }
+    const body = await resp.json();
+    commandButtons = body.buttons || commandButtons;
+    commandRecent = body.recent || commandRecent;
+    renderCommandUi();
+  } catch (e) {
+    window.alert(String(e.message || e));
+  }
 }
 
 const btnManageModal = document.getElementById('btn-manage-modal');
-const btnManageList = document.getElementById('btn-manage-list');
+const btnManageInstances = document.getElementById('btn-manage-instances');
+const btnManageTemplates = document.getElementById('btn-manage-templates');
 const btnManageErr = document.getElementById('btn-manage-err');
 const btnEditModal = document.getElementById('btn-edit-modal');
 const btnEditForm = document.getElementById('btn-edit-form');
@@ -295,6 +399,7 @@ const btnEditCommand = document.getElementById('btn-edit-command');
 const btnEditDanger = document.getElementById('btn-edit-danger');
 const btnEditErr = document.getElementById('btn-edit-err');
 const btnEditParamsList = document.getElementById('btn-edit-params-list');
+const btnTypeRadios = btnEditForm.querySelectorAll('input[name="btn-type"]');
 const btnRunModal = document.getElementById('btn-run-modal');
 const btnRunForm = document.getElementById('btn-run-form');
 const btnRunTitle = document.getElementById('btn-run-title');
@@ -303,10 +408,32 @@ const btnRunErr = document.getElementById('btn-run-err');
 let pendingRunButton = null;
 let editingParams = [];
 
+function getEditType() {
+  const checked = btnEditForm.querySelector('input[name="btn-type"]:checked');
+  return checked ? checked.value : 'instance';
+}
+
+function setEditType(type) {
+  btnTypeRadios.forEach((r) => { r.checked = r.value === type; });
+  syncEditTypeUi();
+}
+
+function syncEditTypeUi() {
+  const isTpl = getEditType() === 'template';
+  btnEditForm.querySelectorAll('.template-only').forEach((el) => {
+    el.hidden = !isTpl;
+  });
+  btnEditCommand.placeholder = isTpl
+    ? '例如：shell:echo ${paraA}'
+    : '例如：shell:vcgencmd measure_temp';
+}
+
+btnTypeRadios.forEach((r) => r.addEventListener('change', syncEditTypeUi));
+
 function renderEditParams() {
   btnEditParamsList.innerHTML = '';
   if (!editingParams.length) {
-    btnEditParamsList.innerHTML = '<p class="muted">无参数。命令中写 <code>${参数名}</code> 后在此添加对应参数。</p>';
+    btnEditParamsList.innerHTML = '<p class="muted">无参数。命令中写 <code>${参数名}</code> 后在此添加。</p>';
     return;
   }
   editingParams.forEach((param, index) => {
@@ -326,6 +453,7 @@ function renderEditParams() {
 }
 
 function collectEditParams() {
+  if (getEditType() !== 'template') return [];
   const rows = btnEditParamsList.querySelectorAll('.btn-param-row');
   const out = [];
   const seen = new Set();
@@ -335,60 +463,105 @@ function collectEditParams() {
     const def = row.querySelector('.param-default').value;
     if (!name) continue;
     if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(name)) {
-      throw new Error(`参数名无效：${name}（须字母开头，仅字母数字下划线）`);
+      throw new Error(`参数名无效：${name}`);
     }
     if (seen.has(name)) throw new Error(`参数名重复：${name}`);
     seen.add(name);
     out.push({ name, label: label || name, default: def });
   }
-  if (out.length > 8) throw new Error('每个按钮最多 8 个参数');
+  if (out.length > 8) throw new Error('每个模板最多 8 个参数');
   return out;
 }
 
 function paramsSummary(btn) {
-  const params = Array.isArray(btn.params) ? btn.params : [];
-  if (!params.length) return '';
-  return ` · 参数 ${params.map((p) => p.name).join(', ')}`;
+  if (!isTemplate(btn) || !btn.params?.length) return '';
+  return ` · 参数 ${btn.params.map((p) => p.name).join(', ')}`;
+}
+
+function buildManageRow(btn, kind) {
+  const row = document.createElement('div');
+  row.className = 'btn-manage-row';
+  row.dataset.id = btn.id;
+  row.dataset.kind = kind;
+  row.innerHTML = `
+    <button type="button" class="drag-handle" title="拖动排序" aria-label="拖动排序">≡</button>
+    <div class="btn-manage-info">
+      <strong>${escapeHtml(btn.label)}</strong>
+      <code>${escapeHtml(btn.command)}</code>
+      <span class="muted manage-meta">${escapeHtml(paramsSummary(btn))}</span>
+      ${btn.danger ? '<span class="badge danger-badge">危险</span>' : ''}
+    </div>
+    <div class="btn-manage-actions">
+      <button type="button" class="ghost btn-sm" data-action="copy">复制</button>
+      <button type="button" class="ghost btn-sm" data-action="edit">编辑</button>
+      <button type="button" class="ghost btn-sm danger-text" data-action="delete">删除</button>
+    </div>`;
+
+  const handle = row.querySelector('.drag-handle');
+  handle.addEventListener('mousedown', () => { row.draggable = true; });
+  handle.addEventListener('mouseup', () => { row.draggable = false; });
+
+  row.addEventListener('dragstart', (ev) => {
+    if (!ev.target.closest('.drag-handle')) {
+      ev.preventDefault();
+      return;
+    }
+    dragState = { id: btn.id, kind };
+    row.classList.add('dragging');
+    ev.dataTransfer.effectAllowed = 'move';
+    ev.dataTransfer.setData('text/plain', btn.id);
+  });
+  row.addEventListener('dragend', () => {
+    row.classList.remove('dragging');
+    dragState = null;
+    document.querySelectorAll('.btn-manage-row.drag-over').forEach((el) => el.classList.remove('drag-over'));
+  });
+  row.addEventListener('dragover', (ev) => {
+    if (!dragState || dragState.kind !== kind || dragState.id === btn.id) return;
+    ev.preventDefault();
+    row.classList.add('drag-over');
+  });
+  row.addEventListener('dragleave', () => row.classList.remove('drag-over'));
+  row.addEventListener('drop', async (ev) => {
+    ev.preventDefault();
+    row.classList.remove('drag-over');
+    if (!dragState || dragState.kind !== kind) return;
+    await reorderByDrag(dragState.id, btn.id, kind);
+  });
+
+  row.querySelector('[data-action="edit"]').addEventListener('click', () => openButtonEditor(btn.id));
+  row.querySelector('[data-action="copy"]').addEventListener('click', () => copyCommandButton(btn.id));
+  row.querySelector('[data-action="delete"]').addEventListener('click', () => deleteCommandButton(btn.id));
+  return row;
 }
 
 function renderManageList() {
-  btnManageList.innerHTML = '';
-  if (!commandButtons.length) {
-    btnManageList.innerHTML = '<p class="muted">还没有按钮，点击下方「添加按钮」。</p>';
-    return;
+  const { instances, templates } = splitButtons();
+  btnManageInstances.innerHTML = instances.length ? '' : '<p class="muted">暂无命令。</p>';
+  btnManageTemplates.innerHTML = templates.length ? '' : '<p class="muted">暂无模板。</p>';
+  instances.forEach((btn) => btnManageInstances.appendChild(buildManageRow(btn, 'instance')));
+  templates.forEach((btn) => btnManageTemplates.appendChild(buildManageRow(btn, 'template')));
+}
+
+async function reorderByDrag(sourceId, targetId, kind) {
+  const { instances, templates } = splitButtons();
+  const list = kind === 'template' ? [...templates] : [...instances];
+  const from = list.findIndex((b) => b.id === sourceId);
+  const to = list.findIndex((b) => b.id === targetId);
+  if (from < 0 || to < 0 || from === to) return;
+  const [item] = list.splice(from, 1);
+  list.splice(to, 0, item);
+  if (kind === 'template') mergeButtons(instances, list);
+  else mergeButtons(list, templates);
+  btnManageErr.textContent = '';
+  try {
+    await persistCommandButtons();
+    renderManageList();
+  } catch (e) {
+    btnManageErr.textContent = String(e.message || e);
+    await loadCommandButtons();
+    renderManageList();
   }
-  commandButtons.forEach((btn, index) => {
-    const row = document.createElement('div');
-    row.className = 'btn-manage-row';
-    row.innerHTML = `
-      <div class="btn-manage-order">
-        <button type="button" class="ghost btn-sm" data-action="up" data-id="${escapeHtml(btn.id)}" ${index === 0 ? 'disabled' : ''} title="上移">↑</button>
-        <button type="button" class="ghost btn-sm" data-action="down" data-id="${escapeHtml(btn.id)}" ${index === commandButtons.length - 1 ? 'disabled' : ''} title="下移">↓</button>
-      </div>
-      <div class="btn-manage-info">
-        <strong>${escapeHtml(btn.label)}</strong>
-        <code>${escapeHtml(btn.command)}</code>
-        <span class="muted manage-meta">${escapeHtml(paramsSummary(btn))}</span>
-        ${btn.danger ? '<span class="badge danger-badge">危险</span>' : ''}
-      </div>
-      <div class="btn-manage-actions">
-        <button type="button" class="ghost btn-sm" data-action="copy" data-id="${escapeHtml(btn.id)}">复制</button>
-        <button type="button" class="ghost btn-sm" data-action="edit" data-id="${escapeHtml(btn.id)}">编辑</button>
-        <button type="button" class="ghost btn-sm danger-text" data-action="delete" data-id="${escapeHtml(btn.id)}">删除</button>
-      </div>`;
-    btnManageList.appendChild(row);
-  });
-  btnManageList.querySelectorAll('button[data-action]').forEach((b) => {
-    b.addEventListener('click', () => {
-      const id = b.dataset.id;
-      const action = b.dataset.action;
-      if (action === 'edit') openButtonEditor(id);
-      else if (action === 'delete') deleteCommandButton(id);
-      else if (action === 'copy') copyCommandButton(id);
-      else if (action === 'up') moveCommandButton(id, -1);
-      else if (action === 'down') moveCommandButton(id, 1);
-    });
-  });
 }
 
 function openButtonManager() {
@@ -402,29 +575,32 @@ function closeButtonManager() {
   btnManageModal.hidden = true;
 }
 
-function openButtonEditor(id, template = null) {
+function openButtonEditor(id, template = null, forcedType = null) {
   editingButtonId = id || null;
   btnEditErr.textContent = '';
   const source = template || (editingButtonId ? commandButtons.find((b) => b.id === editingButtonId) : null);
   if (editingButtonId && !source) return;
   if (template) {
-    btnEditTitle.textContent = '复制按钮';
+    btnEditTitle.textContent = '复制';
     btnEditLabel.value = source.label.length > 36 ? `${source.label.slice(0, 36)} 副本` : `${source.label} 副本`;
     btnEditCommand.value = source.command;
     btnEditDanger.checked = !!source.danger;
     editingParams = (source.params || []).map((p) => ({ ...p }));
+    setEditType(isTemplate(source) ? 'template' : 'instance');
   } else if (editingButtonId && source) {
-    btnEditTitle.textContent = '编辑按钮';
+    btnEditTitle.textContent = isTemplate(source) ? '编辑模板' : '编辑命令';
     btnEditLabel.value = source.label;
     btnEditCommand.value = source.command;
     btnEditDanger.checked = !!source.danger;
     editingParams = (source.params || []).map((p) => ({ ...p }));
+    setEditType(isTemplate(source) ? 'template' : 'instance');
   } else {
-    btnEditTitle.textContent = '添加按钮';
+    btnEditTitle.textContent = forcedType === 'template' ? '添加模板' : '添加命令';
     btnEditLabel.value = '';
     btnEditCommand.value = '';
     btnEditDanger.checked = false;
     editingParams = [];
+    setEditType(forcedType || 'instance');
   }
   renderEditParams();
   btnEditModal.hidden = false;
@@ -437,38 +613,27 @@ function copyCommandButton(id) {
   openButtonEditor(null, btn);
 }
 
-async function moveCommandButton(id, delta) {
-  const index = commandButtons.findIndex((b) => b.id === id);
-  const target = index + delta;
-  if (index < 0 || target < 0 || target >= commandButtons.length) return;
-  const next = [...commandButtons];
-  const [item] = next.splice(index, 1);
-  next.splice(target, 0, item);
-  commandButtons = next;
-  btnManageErr.textContent = '';
-  try {
-    await persistCommandButtons();
-    renderManageList();
-  } catch (e) {
-    btnManageErr.textContent = String(e.message || e);
-    await loadCommandButtons();
-    renderManageList();
-  }
-}
-
 function openRunModal(btn) {
   pendingRunButton = btn;
   btnRunErr.textContent = '';
   btnRunTitle.textContent = btn.label;
   btnRunFields.innerHTML = '';
-  (btn.params || []).forEach((param) => {
-    const wrap = document.createElement('label');
-    wrap.className = 'field-block';
-    wrap.innerHTML = `
-      <span class="field-label">${escapeHtml(param.label || param.name)} <code>\${${escapeHtml(param.name)}}</code></span>
-      <input type="text" data-param-name="${escapeHtml(param.name)}" value="${escapeHtml(param.default || '')}" maxlength="200" />`;
+  const params = btn.params || [];
+  if (!params.length) {
+    const wrap = document.createElement('p');
+    wrap.className = 'muted';
+    wrap.textContent = '此模板未定义参数，将直接执行命令。';
     btnRunFields.appendChild(wrap);
-  });
+  } else {
+    params.forEach((param) => {
+      const wrap = document.createElement('label');
+      wrap.className = 'field-block';
+      wrap.innerHTML = `
+        <span class="field-label">${escapeHtml(param.label || param.name)} <code>\${${escapeHtml(param.name)}}</code></span>
+        <input type="text" data-param-name="${escapeHtml(param.name)}" value="${escapeHtml(param.default || '')}" maxlength="200" />`;
+      btnRunFields.appendChild(wrap);
+    });
+  }
   btnRunModal.hidden = false;
   const first = btnRunFields.querySelector('input');
   if (first) setTimeout(() => first.focus(), 30);
@@ -487,14 +652,14 @@ function closeButtonEditor() {
 async function deleteCommandButton(id) {
   const btn = commandButtons.find((b) => b.id === id);
   if (!btn) return;
-  if (!window.confirm(`删除按钮「${btn.label}」？`)) return;
+  if (!window.confirm(`删除「${btn.label}」？`)) return;
   btnManageErr.textContent = '';
   commandButtons = commandButtons.filter((b) => b.id !== id);
   try {
     await persistCommandButtons();
     renderManageList();
   } catch (e) {
-    btnManageErr.textContent = String(e);
+    btnManageErr.textContent = String(e.message || e);
     await loadCommandButtons();
     renderManageList();
   }
@@ -502,16 +667,15 @@ async function deleteCommandButton(id) {
 
 document.getElementById('btn-manage-commands').addEventListener('click', openButtonManager);
 document.getElementById('btn-manage-close').addEventListener('click', closeButtonManager);
-document.getElementById('btn-manage-add').addEventListener('click', () => openButtonEditor(null));
+document.getElementById('btn-manage-add-instance').addEventListener('click', () => openButtonEditor(null, null, 'instance'));
+document.getElementById('btn-manage-add-template').addEventListener('click', () => openButtonEditor(null, null, 'template'));
 document.getElementById('btn-edit-param-add').addEventListener('click', () => {
   if (editingParams.length >= 8) {
-    btnEditErr.textContent = '每个按钮最多 8 个参数';
+    btnEditErr.textContent = '每个模板最多 8 个参数';
     return;
   }
   editingParams.push({ name: '', label: '', default: '' });
   renderEditParams();
-  const last = btnEditParamsList.querySelector('.btn-param-row:last-child .param-name');
-  if (last) last.focus();
 });
 document.getElementById('btn-edit-cancel').addEventListener('click', closeButtonEditor);
 document.getElementById('btn-run-cancel').addEventListener('click', closeRunModal);
@@ -519,7 +683,7 @@ btnManageModal.addEventListener('click', (ev) => { if (ev.target === btnManageMo
 btnEditModal.addEventListener('click', (ev) => { if (ev.target === btnEditModal) closeButtonEditor(); });
 btnRunModal.addEventListener('click', (ev) => { if (ev.target === btnRunModal) closeRunModal(); });
 
-btnRunForm.addEventListener('submit', (ev) => {
+btnRunForm.addEventListener('submit', async (ev) => {
   ev.preventDefault();
   btnRunErr.textContent = '';
   const btn = pendingRunButton;
@@ -531,6 +695,7 @@ btnRunForm.addEventListener('submit', (ev) => {
   const command = applyCommandParams(btn.command, values);
   if (btn.danger && !window.confirm(`确认执行 ${command}？`)) return;
   closeRunModal();
+  await recordRecent(command, btn);
   runCommand(command);
 });
 
@@ -540,6 +705,7 @@ btnEditForm.addEventListener('submit', async (ev) => {
   const label = btnEditLabel.value.trim();
   const command = btnEditCommand.value.trim();
   const danger = btnEditDanger.checked;
+  const type = getEditType();
   if (!label || !command) {
     btnEditErr.textContent = '请填写按钮文字和执行命令';
     return;
@@ -559,6 +725,7 @@ btnEditForm.addEventListener('submit', async (ev) => {
   }
   const next = {
     id: editingButtonId || newButtonId(),
+    type,
     label,
     command,
     danger,
@@ -583,6 +750,8 @@ btnEditForm.addEventListener('submit', async (ev) => {
     }
   }
 });
+
+syncEditTypeUi();
 
 // ---------------------------------------------------------------------------
 // Terminal (xterm.js) — requires auth

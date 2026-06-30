@@ -89,10 +89,18 @@
         <button type="submit">执行</button>
       </form>
       <div class="quick-toolbar">
-        <span class="muted quick-label">快捷按钮</span>
+        <span class="muted quick-label">快捷执行</span>
         <button type="button" id="btn-manage-commands" class="ghost btn-sm">管理</button>
       </div>
-      <div id="quick-buttons" class="quick"></div>
+      <h3 class="quick-section-title">命令</h3>
+      <p class="muted section-hint">固定命令，点击即执行</p>
+      <div id="cmd-instances" class="quick"></div>
+      <h3 class="quick-section-title">命令模板</h3>
+      <p class="muted section-hint">每次执行前需填写参数</p>
+      <div id="cmd-templates" class="quick"></div>
+      <h3 class="quick-section-title">最近使用</h3>
+      <p class="muted section-hint">由模板生成，最多保留 10 条，可存为命令</p>
+      <div id="cmd-recent" class="recent-list"></div>
       <pre id="cmd-output" aria-live="polite"></pre>
     </div>
   </section>
@@ -125,11 +133,15 @@
 <!-- Command button manager -->
 <div id="btn-manage-modal" class="modal" hidden>
   <div class="modal-card modal-wide">
-    <h2>管理快捷按钮</h2>
-    <p class="muted">新增、修改或删除命令页的快捷按钮，配置会保存在服务器上。</p>
-    <div id="btn-manage-list" class="btn-manage-list"></div>
+    <h2>管理命令</h2>
+    <p class="muted">拖动左侧 <span class="drag-hint">≡</span> 调整顺序。命令模板每次执行需填参数；命令为固定内容。</p>
+    <h3 class="manage-section-title">命令</h3>
+    <div id="btn-manage-instances" class="btn-manage-list" data-kind="instance"></div>
+    <h3 class="manage-section-title">命令模板</h3>
+    <div id="btn-manage-templates" class="btn-manage-list" data-kind="template"></div>
     <div class="modal-actions">
-      <button type="button" id="btn-manage-add" class="ghost">添加按钮</button>
+      <button type="button" id="btn-manage-add-instance" class="ghost">添加命令</button>
+      <button type="button" id="btn-manage-add-template" class="ghost">添加模板</button>
       <button type="button" id="btn-manage-close" class="primary">完成</button>
     </div>
     <p id="btn-manage-err" class="err"></p>
@@ -141,12 +153,17 @@
   <div class="modal-card modal-wide">
     <h2 id="btn-edit-title">添加按钮</h2>
     <form id="btn-edit-form">
+      <fieldset class="type-toggle">
+        <legend class="field-label">类型</legend>
+        <label class="radio-row"><input type="radio" name="btn-type" value="instance" checked /> 命令（固定，直接执行）</label>
+        <label class="radio-row"><input type="radio" name="btn-type" value="template" /> 命令模板（每次需填参数）</label>
+      </fieldset>
       <label class="field-label" for="btn-edit-label">按钮文字</label>
       <input type="text" id="btn-edit-label" placeholder="例如：查看温度" maxlength="40" required />
       <label class="field-label" for="btn-edit-command">执行命令</label>
       <input type="text" id="btn-edit-command" placeholder="例如：shell:echo ${paraA}" maxlength="500" required />
-      <p class="muted field-hint">命令中可用 <code>${参数名}</code> 引用下方定义的参数，例如参数名 <code>paraA</code> 对应 <code>${paraA}</code></p>
-      <div class="btn-edit-params">
+      <p class="muted field-hint template-only">模板命令中可用 <code>${参数名}</code> 引用参数，例如参数名 <code>paraA</code> 对应 <code>${paraA}</code></p>
+      <div class="btn-edit-params template-only">
         <div class="field-label-row">
           <span class="field-label">参数</span>
           <button type="button" id="btn-edit-param-add" class="ghost btn-sm">添加参数</button>

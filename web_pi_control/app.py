@@ -33,7 +33,7 @@ from fastapi.responses import (
 from fastapi.staticfiles import StaticFiles
 
 from pi_remote_core import config, system_info
-from pi_remote_core.command_buttons import load_buttons, save_buttons
+from pi_remote_core.command_buttons import add_recent, load_state, promote_recent, save_buttons
 from pi_remote_core.commands import CommandHandler
 
 from .auth import COOKIE_NAME, make_token, verify_token
@@ -227,7 +227,7 @@ async def api_command(payload: dict, _: str = Depends(require_session)):
 
 @app.get("/api/command-buttons")
 async def api_get_command_buttons(_: str = Depends(require_session)):
-    return {"buttons": load_buttons()}
+    return load_state()
 
 
 @app.put("/api/command-buttons")
@@ -239,7 +239,30 @@ async def api_put_command_buttons(payload: dict, _: str = Depends(require_sessio
         saved = save_buttons(buttons)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {"buttons": saved}
+    state = load_state()
+    return {"buttons": saved, "recent": state["recent"]}
+
+
+@app.post("/api/command-buttons/recent")
+async def api_add_command_recent(payload: dict, _: str = Depends(require_session)):
+    try:
+        recent = add_recent(payload or {})
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"recent": recent}
+
+
+@app.post("/api/command-buttons/promote")
+async def api_promote_command_recent(payload: dict, _: str = Depends(require_session)):
+    recent_id = str((payload or {}).get("recent_id") or "").strip()
+    if not recent_id:
+        raise HTTPException(status_code=400, detail="missing 'recent_id'")
+    label = (payload or {}).get("label")
+    try:
+        result = promote_recent(recent_id, label=str(label).strip() if label else None)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return result
 
 
 # --------------------------------------------------------------------------- #
