@@ -210,6 +210,76 @@ button.danger { background: var(--danger); color: #ffffff; }
 .quick button { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); font-weight: 400; }
 .quick button.danger { background: rgba(248,113,113,0.1); color: var(--danger); border-color: rgba(248,113,113,0.4); }
 
+.quick-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.quick-toolbar .quick-label { font-size: 13px; }
+button.btn-sm { padding: 6px 12px; font-size: 13px; font-weight: 500; }
+
+.modal-card.modal-wide { max-width: 560px; }
+.field-label {
+  display: block;
+  font-size: 13px;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+#btn-edit-form input[type="text"] { margin-bottom: 12px; }
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  margin-bottom: 12px;
+  cursor: pointer;
+}
+.checkbox-row input { width: auto; margin: 0; }
+
+.btn-manage-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 50vh;
+  overflow: auto;
+  margin-bottom: 16px;
+}
+.btn-manage-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-2);
+}
+.btn-manage-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.btn-manage-info strong { font-size: 14px; }
+.btn-manage-info code {
+  font-size: 12px;
+  word-break: break-all;
+  white-space: pre-wrap;
+}
+.btn-manage-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.danger-badge {
+  background: rgba(220, 38, 38, 0.1);
+  color: var(--danger);
+  border-color: rgba(220, 38, 38, 0.3);
+  align-self: flex-start;
+}
+button.danger-text { color: var(--danger); }
+
 pre#cmd-output {
   background: #f9fafb;
   border: 1px solid var(--border);

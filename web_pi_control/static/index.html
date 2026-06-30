@@ -88,18 +88,11 @@
         <input type="text" id="cmd-input" placeholder="例如：status 或 shell:vcgencmd measure_temp" autocomplete="off" />
         <button type="submit">执行</button>
       </form>
-      <div class="quick">
-        <button data-cmd="status">status</button>
-        <button data-cmd="help">help</button>
-        <button data-cmd="ip">ip</button>
-        <button data-cmd="uptime">uptime</button>
-        <button data-cmd="shell:uname -a">uname -a</button>
-        <button data-cmd="shell:df -h">df -h</button>
-        <button data-cmd="shell:free -h">free -h</button>
-        <button data-cmd="shell:vcgencmd measure_temp">measure_temp</button>
-        <button data-cmd="reboot" class="danger">reboot</button>
-        <button data-cmd="shutdown" class="danger">shutdown</button>
+      <div class="quick-toolbar">
+        <span class="muted quick-label">快捷按钮</span>
+        <button type="button" id="btn-manage-commands" class="ghost btn-sm">管理</button>
       </div>
+      <div id="quick-buttons" class="quick"></div>
       <pre id="cmd-output" aria-live="polite"></pre>
     </div>
   </section>
@@ -125,6 +118,42 @@
         <button type="submit" class="primary">登录</button>
       </div>
       <p id="login-err" class="err"></p>
+    </form>
+  </div>
+</div>
+
+<!-- Command button manager -->
+<div id="btn-manage-modal" class="modal" hidden>
+  <div class="modal-card modal-wide">
+    <h2>管理快捷按钮</h2>
+    <p class="muted">新增、修改或删除命令页的快捷按钮，配置会保存在服务器上。</p>
+    <div id="btn-manage-list" class="btn-manage-list"></div>
+    <div class="modal-actions">
+      <button type="button" id="btn-manage-add" class="ghost">添加按钮</button>
+      <button type="button" id="btn-manage-close" class="primary">完成</button>
+    </div>
+    <p id="btn-manage-err" class="err"></p>
+  </div>
+</div>
+
+<!-- Add / edit single command button -->
+<div id="btn-edit-modal" class="modal" hidden>
+  <div class="modal-card">
+    <h2 id="btn-edit-title">添加按钮</h2>
+    <form id="btn-edit-form">
+      <label class="field-label" for="btn-edit-label">按钮文字</label>
+      <input type="text" id="btn-edit-label" placeholder="例如：查看温度" maxlength="40" required />
+      <label class="field-label" for="btn-edit-command">执行命令</label>
+      <input type="text" id="btn-edit-command" placeholder="例如：shell:vcgencmd measure_temp" maxlength="500" required />
+      <label class="checkbox-row">
+        <input type="checkbox" id="btn-edit-danger" />
+        危险操作（执行前确认）
+      </label>
+      <div class="modal-actions">
+        <button type="button" id="btn-edit-cancel" class="ghost">取消</button>
+        <button type="submit" class="primary">保存</button>
+      </div>
+      <p id="btn-edit-err" class="err"></p>
     </form>
   </div>
 </div>

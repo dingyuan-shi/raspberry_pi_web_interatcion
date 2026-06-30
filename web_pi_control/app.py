@@ -33,6 +33,7 @@ from fastapi.responses import (
 from fastapi.staticfiles import StaticFiles
 
 from pi_remote_core import config, system_info
+from pi_remote_core.command_buttons import load_buttons, save_buttons
 from pi_remote_core.commands import CommandHandler
 
 from .auth import COOKIE_NAME, make_token, verify_token
@@ -222,6 +223,23 @@ async def api_command(payload: dict, _: str = Depends(require_session)):
     result = await handler.handle(command)
     handler.reset_session()
     return {"command": command, "result": result}
+
+
+@app.get("/api/command-buttons")
+async def api_get_command_buttons(_: str = Depends(require_session)):
+    return {"buttons": load_buttons()}
+
+
+@app.put("/api/command-buttons")
+async def api_put_command_buttons(payload: dict, _: str = Depends(require_session)):
+    buttons = (payload or {}).get("buttons")
+    if not isinstance(buttons, list):
+        raise HTTPException(status_code=400, detail="missing 'buttons' array")
+    try:
+        saved = save_buttons(buttons)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"buttons": saved}
 
 
 # --------------------------------------------------------------------------- #
