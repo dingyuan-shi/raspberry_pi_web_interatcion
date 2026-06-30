@@ -7,6 +7,7 @@ Every value can be overridden through an environment variable
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 
 def _bool(value: str | None, default: bool) -> bool:
@@ -48,3 +49,15 @@ WEB_SESSION_HOURS: int = int(os.environ.get("WEB_SESSION_HOURS", "12"))
 # When enabled the /api/shell WebSocket gives a full interactive PTY.  The
 # command-protocol shell:<...> rule still respects ENABLE_SHELL above.
 WEB_ENABLE_PTY: bool = _bool(os.environ.get("WEB_ENABLE_PTY"), True)
+
+# ---- Persistent data (command buttons, etc.) ------------------------------ #
+
+
+def _default_data_dir() -> str:
+    opt = Path("/opt/pi-remote")
+    if opt.is_dir():
+        return str(opt / "data")
+    return str(Path(__file__).resolve().parent.parent / "data")
+
+
+DATA_DIR: str = os.environ.get("PI_REMOTE_DATA_DIR", _default_data_dir())

@@ -81,6 +81,7 @@ fi
 
 rsync -a --delete \
     --exclude '.git' --exclude '.venv' --exclude 'venv' --exclude '__pycache__' \
+    --exclude 'data' \
     "${SRC_DIR}/" "${INSTALL_DIR}/"
 
 # PyPI index (China-friendly default). Override: PIP_INDEX_URL=https://pypi.org/simple

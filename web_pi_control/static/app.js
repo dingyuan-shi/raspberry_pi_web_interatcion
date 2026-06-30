@@ -31,6 +31,7 @@ function applyAuthState(isAuthed) {
     const active = document.querySelector('.tabs button.active');
     if (active && active.hasAttribute('data-auth')) selectTab('monitor');
   }
+  loadCommandButtons();
 }
 
 function selectTab(name) {
@@ -181,13 +182,213 @@ cmdForm.addEventListener('submit', (ev) => {
   runCommand(cmd);
 });
 
-document.querySelectorAll('.quick button').forEach((btn) => {
-  btn.addEventListener('click', () => {
-    if (!authenticated) { openLoginModal(); return; }
-    const cmd = btn.dataset.cmd;
-    if (btn.classList.contains('danger') && !window.confirm(`确认执行 ${cmd}？`)) return;
-    runCommand(cmd);
+// ---------------------------------------------------------------------------
+// Quick command buttons (persisted on server)
+// ---------------------------------------------------------------------------
+
+const quickRoot = document.getElementById('quick-buttons');
+let commandButtons = [];
+let editingButtonId = null;
+
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function renderQuickButtons() {
+  quickRoot.innerHTML = '';
+  if (!commandButtons.length) {
+    quickRoot.innerHTML = '<p class="muted">暂无快捷按钮，点击「管理」添加。</p>';
+    return;
+  }
+  commandButtons.forEach((btn) => {
+    const el = document.createElement('button');
+    el.type = 'button';
+    el.textContent = btn.label;
+    el.dataset.cmd = btn.command;
+    if (btn.danger) el.classList.add('danger');
+    el.addEventListener('click', () => {
+      if (!authenticated) { openLoginModal(); return; }
+      if (btn.danger && !window.confirm(`确认执行 ${btn.command}？`)) return;
+      runCommand(btn.command);
+    });
+    quickRoot.appendChild(el);
   });
+}
+
+async function loadCommandButtons() {
+  if (!authenticated) {
+    commandButtons = [];
+    renderQuickButtons();
+    return;
+  }
+  try {
+    const resp = await fetch('/api/command-buttons');
+    if (resp.status === 401) {
+      applyAuthState(false);
+      return;
+    }
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const body = await resp.json();
+    commandButtons = Array.isArray(body.buttons) ? body.buttons : [];
+    renderQuickButtons();
+  } catch (e) {
+    quickRoot.innerHTML = `<p class="err">加载快捷按钮失败：${escapeHtml(e)}</p>`;
+  }
+}
+
+async function persistCommandButtons() {
+  const resp = await fetch('/api/command-buttons', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ buttons: commandButtons }),
+  });
+  if (resp.status === 401) {
+    applyAuthState(false);
+    openLoginModal();
+    throw new Error('未登录');
+  }
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => ({}));
+    throw new Error(body.detail || `HTTP ${resp.status}`);
+  }
+  const body = await resp.json();
+  commandButtons = body.buttons || commandButtons;
+  renderQuickButtons();
+}
+
+const btnManageModal = document.getElementById('btn-manage-modal');
+const btnManageList = document.getElementById('btn-manage-list');
+const btnManageErr = document.getElementById('btn-manage-err');
+const btnEditModal = document.getElementById('btn-edit-modal');
+const btnEditForm = document.getElementById('btn-edit-form');
+const btnEditTitle = document.getElementById('btn-edit-title');
+const btnEditLabel = document.getElementById('btn-edit-label');
+const btnEditCommand = document.getElementById('btn-edit-command');
+const btnEditDanger = document.getElementById('btn-edit-danger');
+const btnEditErr = document.getElementById('btn-edit-err');
+
+function renderManageList() {
+  btnManageList.innerHTML = '';
+  if (!commandButtons.length) {
+    btnManageList.innerHTML = '<p class="muted">还没有按钮，点击下方「添加按钮」。</p>';
+    return;
+  }
+  commandButtons.forEach((btn) => {
+    const row = document.createElement('div');
+    row.className = 'btn-manage-row';
+    row.innerHTML = `
+      <div class="btn-manage-info">
+        <strong>${escapeHtml(btn.label)}</strong>
+        <code>${escapeHtml(btn.command)}</code>
+        ${btn.danger ? '<span class="badge danger-badge">危险</span>' : ''}
+      </div>
+      <div class="btn-manage-actions">
+        <button type="button" class="ghost btn-sm" data-action="edit" data-id="${escapeHtml(btn.id)}">编辑</button>
+        <button type="button" class="ghost btn-sm danger-text" data-action="delete" data-id="${escapeHtml(btn.id)}">删除</button>
+      </div>`;
+    btnManageList.appendChild(row);
+  });
+  btnManageList.querySelectorAll('button[data-action]').forEach((b) => {
+    b.addEventListener('click', () => {
+      const id = b.dataset.id;
+      if (b.dataset.action === 'edit') openButtonEditor(id);
+      else deleteCommandButton(id);
+    });
+  });
+}
+
+function openButtonManager() {
+  if (!authenticated) { openLoginModal(); return; }
+  btnManageErr.textContent = '';
+  renderManageList();
+  btnManageModal.hidden = false;
+}
+
+function closeButtonManager() {
+  btnManageModal.hidden = true;
+}
+
+function openButtonEditor(id) {
+  editingButtonId = id || null;
+  btnEditErr.textContent = '';
+  if (editingButtonId) {
+    const btn = commandButtons.find((b) => b.id === editingButtonId);
+    if (!btn) return;
+    btnEditTitle.textContent = '编辑按钮';
+    btnEditLabel.value = btn.label;
+    btnEditCommand.value = btn.command;
+    btnEditDanger.checked = !!btn.danger;
+  } else {
+    btnEditTitle.textContent = '添加按钮';
+    btnEditLabel.value = '';
+    btnEditCommand.value = '';
+    btnEditDanger.checked = false;
+  }
+  btnEditModal.hidden = false;
+  setTimeout(() => btnEditLabel.focus(), 30);
+}
+
+function closeButtonEditor() {
+  btnEditModal.hidden = true;
+  editingButtonId = null;
+}
+
+async function deleteCommandButton(id) {
+  const btn = commandButtons.find((b) => b.id === id);
+  if (!btn) return;
+  if (!window.confirm(`删除按钮「${btn.label}」？`)) return;
+  btnManageErr.textContent = '';
+  commandButtons = commandButtons.filter((b) => b.id !== id);
+  try {
+    await persistCommandButtons();
+    renderManageList();
+  } catch (e) {
+    btnManageErr.textContent = String(e);
+    await loadCommandButtons();
+    renderManageList();
+  }
+}
+
+document.getElementById('btn-manage-commands').addEventListener('click', openButtonManager);
+document.getElementById('btn-manage-close').addEventListener('click', closeButtonManager);
+document.getElementById('btn-manage-add').addEventListener('click', () => openButtonEditor(null));
+document.getElementById('btn-edit-cancel').addEventListener('click', closeButtonEditor);
+btnManageModal.addEventListener('click', (ev) => { if (ev.target === btnManageModal) closeButtonManager(); });
+btnEditModal.addEventListener('click', (ev) => { if (ev.target === btnEditModal) closeButtonEditor(); });
+
+btnEditForm.addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  btnEditErr.textContent = '';
+  const label = btnEditLabel.value.trim();
+  const command = btnEditCommand.value.trim();
+  const danger = btnEditDanger.checked;
+  if (!label || !command) {
+    btnEditErr.textContent = '请填写按钮文字和执行命令';
+    return;
+  }
+  const next = {
+    id: editingButtonId || crypto.randomUUID(),
+    label,
+    command,
+    danger,
+  };
+  if (editingButtonId) {
+    commandButtons = commandButtons.map((b) => (b.id === editingButtonId ? next : b));
+  } else {
+    commandButtons = [...commandButtons, next];
+  }
+  try {
+    await persistCommandButtons();
+    closeButtonEditor();
+    renderManageList();
+  } catch (e) {
+    btnEditErr.textContent = String(e);
+    await loadCommandButtons();
+  }
 });
 
 // ---------------------------------------------------------------------------
