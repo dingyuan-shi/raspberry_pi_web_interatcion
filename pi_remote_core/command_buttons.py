@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import uuid
 from pathlib import Path
 from typing import Any
@@ -36,10 +37,52 @@ DEFAULT_BUTTONS: list[dict[str, Any]] = [
 MAX_BUTTONS = 64
 MAX_LABEL_LEN = 40
 MAX_COMMAND_LEN = 500
+MAX_PARAMS = 8
+MAX_PARAM_NAME_LEN = 32
+MAX_PARAM_LABEL_LEN = 40
+MAX_PARAM_DEFAULT_LEN = 200
+_PARAM_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 
 
 def _buttons_path() -> Path:
     return Path(config.DATA_DIR) / "command_buttons.json"
+
+
+def _normalize_param(raw: dict[str, Any]) -> dict[str, str]:
+    name = str(raw.get("name", "")).strip()
+    if not name or not _PARAM_NAME_RE.fullmatch(name):
+        raise ValueError(
+            "param name must start with a letter and contain only letters, digits, underscore"
+        )
+    if len(name) > MAX_PARAM_NAME_LEN:
+        raise ValueError(f"param name must be at most {MAX_PARAM_NAME_LEN} characters")
+    label = str(raw.get("label", "")).strip() or name
+    if len(label) > MAX_PARAM_LABEL_LEN:
+        raise ValueError(f"param label must be at most {MAX_PARAM_LABEL_LEN} characters")
+    default = str(raw.get("default", ""))
+    if len(default) > MAX_PARAM_DEFAULT_LEN:
+        raise ValueError(f"param default must be at most {MAX_PARAM_DEFAULT_LEN} characters")
+    return {"name": name, "label": label, "default": default}
+
+
+def _normalize_params(raw: Any) -> list[dict[str, str]]:
+    if raw in (None, ""):
+        return []
+    if not isinstance(raw, list):
+        raise ValueError("params must be an array")
+    if len(raw) > MAX_PARAMS:
+        raise ValueError(f"at most {MAX_PARAMS} params per button")
+    out: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in raw:
+        if not isinstance(item, dict):
+            raise ValueError("each param must be an object")
+        param = _normalize_param(item)
+        if param["name"] in seen:
+            raise ValueError(f"duplicate param name: {param['name']}")
+        seen.add(param["name"])
+        out.append(param)
+    return out
 
 
 def _normalize_button(raw: dict[str, Any]) -> dict[str, Any]:
@@ -53,7 +96,14 @@ def _normalize_button(raw: dict[str, Any]) -> dict[str, Any]:
         raise ValueError(f"command must be at most {MAX_COMMAND_LEN} characters")
     btn_id = str(raw.get("id") or "").strip() or str(uuid.uuid4())
     danger = bool(raw.get("danger", False))
-    return {"id": btn_id, "label": label, "command": command, "danger": danger}
+    params = _normalize_params(raw.get("params", []))
+    return {
+        "id": btn_id,
+        "label": label,
+        "command": command,
+        "danger": danger,
+        "params": params,
+    }
 
 
 def load_buttons() -> list[dict[str, Any]]:
