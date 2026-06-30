@@ -192,7 +192,56 @@ const recentRoot = document.getElementById('cmd-recent');
 let commandButtons = [];
 let commandRecent = [];
 let editingButtonId = null;
-let dragState = null;
+let pointerDrag = null;
+
+function clearDragOverMarkers() {
+  document.querySelectorAll('.btn-manage-row.drag-over').forEach((el) => el.classList.remove('drag-over'));
+}
+
+function manageRowAtPoint(x, y, ignoreRow) {
+  if (ignoreRow) ignoreRow.style.pointerEvents = 'none';
+  const el = document.elementFromPoint(x, y);
+  if (ignoreRow) ignoreRow.style.pointerEvents = '';
+  return el?.closest('.btn-manage-row') || null;
+}
+
+function attachDragHandle(handle, row, btn, kind) {
+  handle.addEventListener('pointerdown', (ev) => {
+    if (ev.button !== 0) return;
+    ev.preventDefault();
+    pointerDrag = { sourceId: btn.id, kind, row, pointerId: ev.pointerId, handle };
+    row.classList.add('dragging');
+    handle.setPointerCapture(ev.pointerId);
+  });
+
+  handle.addEventListener('pointermove', (ev) => {
+    if (!pointerDrag || pointerDrag.pointerId !== ev.pointerId) return;
+    clearDragOverMarkers();
+    const target = manageRowAtPoint(ev.clientX, ev.clientY, pointerDrag.row);
+    if (target && target.dataset.kind === pointerDrag.kind && target.dataset.id !== pointerDrag.sourceId) {
+      target.classList.add('drag-over');
+    }
+  });
+
+  const finishDrag = async (ev) => {
+    if (!pointerDrag || pointerDrag.pointerId !== ev.pointerId) return;
+    const { sourceId, kind, row: srcRow, handle: h } = pointerDrag;
+    const target = manageRowAtPoint(ev.clientX, ev.clientY, srcRow);
+    clearDragOverMarkers();
+    srcRow.classList.remove('dragging');
+    pointerDrag = null;
+    try { h.releasePointerCapture(ev.pointerId); } catch (_) { /* already released */ }
+    if (target && target.dataset.kind === kind) {
+      const targetId = target.dataset.id;
+      if (targetId && targetId !== sourceId) {
+        await reorderByDrag(sourceId, targetId, kind);
+      }
+    }
+  };
+
+  handle.addEventListener('pointerup', finishDrag);
+  handle.addEventListener('pointercancel', finishDrag);
+}
 
 function newButtonId() {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -264,7 +313,7 @@ function renderRecentList() {
       : '';
     row.innerHTML = `
       <div class="recent-info">
-        <code>${escapeHtml(item.command)}</code>
+        <code class="cmd-preview" title="${escapeHtml(item.command)}">${escapeHtml(item.command)}</code>
         ${from}
       </div>
       <div class="recent-actions">
@@ -484,10 +533,10 @@ function buildManageRow(btn, kind) {
   row.dataset.id = btn.id;
   row.dataset.kind = kind;
   row.innerHTML = `
-    <button type="button" class="drag-handle" title="拖动排序" aria-label="拖动排序">≡</button>
+    <span class="drag-handle" role="button" tabindex="0" title="拖动排序" aria-label="拖动排序">≡</span>
     <div class="btn-manage-info">
       <strong>${escapeHtml(btn.label)}</strong>
-      <code>${escapeHtml(btn.command)}</code>
+      <code class="cmd-preview" title="${escapeHtml(btn.command)}">${escapeHtml(btn.command)}</code>
       <span class="muted manage-meta">${escapeHtml(paramsSummary(btn))}</span>
       ${btn.danger ? '<span class="badge danger-badge">危险</span>' : ''}
     </div>
@@ -497,37 +546,7 @@ function buildManageRow(btn, kind) {
       <button type="button" class="ghost btn-sm danger-text" data-action="delete">删除</button>
     </div>`;
 
-  const handle = row.querySelector('.drag-handle');
-  handle.addEventListener('mousedown', () => { row.draggable = true; });
-  handle.addEventListener('mouseup', () => { row.draggable = false; });
-
-  row.addEventListener('dragstart', (ev) => {
-    if (!ev.target.closest('.drag-handle')) {
-      ev.preventDefault();
-      return;
-    }
-    dragState = { id: btn.id, kind };
-    row.classList.add('dragging');
-    ev.dataTransfer.effectAllowed = 'move';
-    ev.dataTransfer.setData('text/plain', btn.id);
-  });
-  row.addEventListener('dragend', () => {
-    row.classList.remove('dragging');
-    dragState = null;
-    document.querySelectorAll('.btn-manage-row.drag-over').forEach((el) => el.classList.remove('drag-over'));
-  });
-  row.addEventListener('dragover', (ev) => {
-    if (!dragState || dragState.kind !== kind || dragState.id === btn.id) return;
-    ev.preventDefault();
-    row.classList.add('drag-over');
-  });
-  row.addEventListener('dragleave', () => row.classList.remove('drag-over'));
-  row.addEventListener('drop', async (ev) => {
-    ev.preventDefault();
-    row.classList.remove('drag-over');
-    if (!dragState || dragState.kind !== kind) return;
-    await reorderByDrag(dragState.id, btn.id, kind);
-  });
+  attachDragHandle(row.querySelector('.drag-handle'), row, btn, kind);
 
   row.querySelector('[data-action="edit"]').addEventListener('click', () => openButtonEditor(btn.id));
   row.querySelector('[data-action="copy"]').addEventListener('click', () => copyCommandButton(btn.id));
