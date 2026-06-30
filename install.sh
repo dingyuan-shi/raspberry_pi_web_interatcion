@@ -99,18 +99,21 @@ PIP_CONF_FILE="${INSTALL_DIR}/.pip.conf"
         echo "extra-index-url = https://www.piwheels.org/simple"
     fi
 } >"${PIP_CONF_FILE}"
+# When PIP_CONFIG_FILE is set, pip loads ONLY this file (not /etc/pip.conf).
+# Do NOT combine with --isolated — that flag ignores env vars and leaves
+# the system piwheels extra-index-url active.
 export PIP_CONFIG_FILE="${PIP_CONF_FILE}"
 
 PIP_TRUSTED_HOST=$(
     python3 -c "from urllib.parse import urlparse; print(urlparse('${PIP_INDEX_URL}').hostname or '')"
 )
-PIP_ARGS=(--index-url "${PIP_INDEX_URL}" --timeout "${PIP_DEFAULT_TIMEOUT}")
+PIP_ARGS=(
+    --index-url "${PIP_INDEX_URL}"
+    --timeout "${PIP_DEFAULT_TIMEOUT}"
+    --no-cache-dir
+)
 if [[ -n "${PIP_TRUSTED_HOST}" && "${PIP_TRUSTED_HOST}" != "pypi.org" ]]; then
     PIP_ARGS+=(--trusted-host "${PIP_TRUSTED_HOST}")
-fi
-if [[ "${USE_PIWHEELS}" != "1" ]]; then
-    # Ignore /etc/pip.conf extra-index-url (piwheels) even if env vars do not.
-    PIP_ARGS+=(--isolated)
 fi
 
 if [[ "${USE_PIWHEELS}" == "1" ]]; then
@@ -119,7 +122,15 @@ else
     echo "    -> using PyPI mirror: ${PIP_INDEX_URL} (piwheels disabled)"
 fi
 
+write_venv_pip_conf() {
+    # Site config inside the venv — belt-and-suspenders for venv/bin/pip.
+    if [[ -d "${INSTALL_DIR}/venv" ]]; then
+        cp "${PIP_CONF_FILE}" "${INSTALL_DIR}/venv/pip.conf"
+    fi
+}
+
 pip_install() {
+    "${PIP_BIN[@]}" cache purge >/dev/null 2>&1 || true
     "${PIP_BIN[@]}" install "${PIP_ARGS[@]}" "$@"
 }
 if [[ "${NO_VENV:-0}" == "1" ]]; then
@@ -127,13 +138,14 @@ if [[ "${NO_VENV:-0}" == "1" ]]; then
     mkdir -p "${INSTALL_DIR}/venv/bin"
     ln -sf "$(command -v python3)" "${INSTALL_DIR}/venv/bin/python"
     PIP_BIN=(python3 -m pip)
-    pip_install --upgrade pip || true
+    write_venv_pip_conf
     pip_install -r "${INSTALL_DIR}/requirements.txt"
 else
     echo ">>> Creating virtual-env at ${INSTALL_DIR}/venv"
     python3 -m venv "${INSTALL_DIR}/venv"
+    write_venv_pip_conf
     PIP_BIN=("${INSTALL_DIR}/venv/bin/pip")
-    pip_install --upgrade pip
+    # venv ships a working pip; skip --upgrade pip to avoid slow downloads.
     pip_install -r "${INSTALL_DIR}/requirements.txt"
 fi
 
