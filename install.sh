@@ -66,6 +66,7 @@ fi
 
 echo ">>> Copying source to ${INSTALL_DIR}"
 mkdir -p "${INSTALL_DIR}"
+mkdir -p "${INSTALL_DIR}/data"
 
 # Retire the old BLE-only service from early prototypes of this project.
 if systemctl is-enabled ble-pi-control.service &>/dev/null \
