@@ -1,6 +1,6 @@
 # raspberry_pi_web_interaction
 
-在局域网里用浏览器监控和操作树莓派。一个轻量 **FastAPI** 服务，无需公网、无需手机 App。
+在局域网里用浏览器监控和操作树莓派。作为raspberry connect / teamviewer / vnc的平替。一个轻量 **FastAPI** 服务，无需公网、无需手机 App。
 
 ## 它能做什么
 
@@ -26,6 +26,8 @@ http://<树莓派IP>:8080/
 ![快捷命令](docs/screenshots/cmd.png)
 
 ![交互式终端](docs/screenshots/shell.png)
+
+💡 **上面两个功能实现了web端的输入和输出，配合其他硬件拓展模块，可以自行搭建更多的监控和命令。**
 
 ### 3. Lite / Cheap — 廉价设备也能看
 
