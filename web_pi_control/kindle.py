@@ -96,8 +96,9 @@ async def _run_chromium(
     """Try the modern headless mode first, fall back to legacy.
 
     * Chrome >= 109 only honours ``--headless=new`` (plain ``--headless`` hangs).
-    * Older Chromium (e.g. Raspbian Buster's v74) only knows ``--headless``
-      and treats ``--headless=new`` as an unknown switch.
+    * Very old Chromium (pre-109) only knows ``--headless`` and treats
+      ``--headless=new`` as an unknown switch.  Bookworm's chromium works
+      with ``--headless=new``.
     """
     log.info("rendering kindle screenshot: %s (%dx%d)", url, width, height)
     last_err: Optional[str] = None

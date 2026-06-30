@@ -45,7 +45,7 @@ http://<树莓派IP>:8080/cheap    # Kindle 上用（PNG）
 
 ![Lite 廉价监控](docs/screenshots/lite.png)
 
-`/cheap` 需要 `chromium-browser`（`install.sh` 会尝试安装）。诊断：
+`/cheap` 需要 `chromium`（Bookworm 上包名为 `chromium`；`install.sh` 会尝试安装）。诊断：
 
 ```bash
 curl http://<pi>:8080/api/kindle/status
@@ -54,6 +54,8 @@ curl http://<pi>:8080/api/kindle/status
 ---
 
 ## 快速开始
+
+**系统要求：** Raspberry Pi OS **Bookworm**（或更新版本），Python **3.11+**。
 
 ```bash
 git clone https://github.com/dingyuan-shi/raspberry_pi_web_interaction.git
@@ -66,6 +68,14 @@ sudo systemctl restart web-pi-control
 ```
 
 浏览器访问 `http://<树莓派IP>:8080`。
+
+安装时 pip 默认走清华镜像，并**禁用**树莓派系统自带的 `piwheels.org`（国内访问很慢）。若你在英国/欧洲且想用 piwheels 预编译包：
+
+```bash
+sudo USE_PIWHEELS=1 ./install.sh
+```
+
+自定义镜像：`sudo PIP_INDEX_URL=https://pypi.org/simple ./install.sh`
 
 卸载：`sudo ./uninstall.sh`
 

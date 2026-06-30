@@ -14,13 +14,19 @@ fi
 SRC_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 INSTALL_DIR="/opt/pi-remote"
 
+PY_VER=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+PY_MAJOR=$(python3 -c 'import sys; print(sys.version_info.major)')
+PY_MINOR=$(python3 -c 'import sys; print(sys.version_info.minor)')
+if [[ "$PY_MAJOR" -lt 3 || ( "$PY_MAJOR" -eq 3 && "$PY_MINOR" -lt 11 ) ]]; then
+    echo "ERROR: Python 3.11+ required (found ${PY_VER})." >&2
+    echo "       Raspberry Pi OS Bookworm ships Python 3.11." >&2
+    exit 1
+fi
+echo ">>> Python ${PY_VER}"
+
 echo ">>> Checking system packages"
 PKGS=(python3 python3-venv python3-pip rsync)
-# chromium-browser is optional - only used by /api/cheap.png to render
-# the dashboard for Kindle / e-ink clients.  We list it so the installer
-# auto-pulls it when missing, but install will still succeed without.
-OPTIONAL_PKGS=(chromium-browser)
-
+# chromium is optional - only used by /api/cheap.png (see below).
 MISSING=()
 for p in "${PKGS[@]}"; do
     if ! dpkg -l "$p" 2>/dev/null | grep -q '^ii'; then
@@ -37,8 +43,9 @@ else
     if ! apt-get install -y "${MISSING[@]}"; then
         echo
         echo "ERROR: apt-get install failed for: ${MISSING[*]}"
-        echo "       Fix your apt sources (Raspbian Buster needs legacy.raspbian.org)"
-        echo "       or set NO_VENV=1 if only python3-venv is missing."
+        echo "       On Raspberry Pi OS Bookworm install python3-venv with:"
+        echo "         sudo apt-get install python3-venv"
+        echo "       or set NO_VENV=1 if you prefer the system python3."
         exit 1
     fi
 fi
@@ -51,8 +58,10 @@ if ! command -v chromium-browser >/dev/null 2>&1 \
    && ! command -v google-chrome >/dev/null 2>&1 \
    && ! command -v google-chrome-stable >/dev/null 2>&1; then
     echo ">>> chromium not found; attempting to install (needed for /cheap)"
-    apt-get install -y "${OPTIONAL_PKGS[@]}" \
-        || echo "WARNING: could not install chromium-browser; /api/cheap.png will be disabled"
+    if ! apt-get install -y chromium; then
+        apt-get install -y chromium-browser \
+            || echo "WARNING: could not install chromium; /api/cheap.png will be disabled"
+    fi
 fi
 
 echo ">>> Copying source to ${INSTALL_DIR}"
@@ -74,31 +83,70 @@ rsync -a --delete \
     --exclude '.git' --exclude '.venv' --exclude 'venv' --exclude '__pycache__' \
     "${SRC_DIR}/" "${INSTALL_DIR}/"
 
-# Use a China-friendly PyPI mirror by default; override with PIP_INDEX_URL.
+# PyPI index (China-friendly default). Override: PIP_INDEX_URL=https://pypi.org/simple
 : "${PIP_INDEX_URL:=https://pypi.tuna.tsinghua.edu.cn/simple}"
-export PIP_INDEX_URL
-# Raspbian's stock /etc/pip.conf adds piwheels.org as an extra-index-url.
-# That mirror is in the UK and frequently times out from China, so disable
-# it unless the caller deliberately set PIP_EXTRA_INDEX_URL themselves.
-: "${PIP_EXTRA_INDEX_URL:=}"
-export PIP_EXTRA_INDEX_URL
 : "${PIP_DEFAULT_TIMEOUT:=120}"
-export PIP_DEFAULT_TIMEOUT
-echo "    -> using PyPI mirror: ${PIP_INDEX_URL}"
+# Raspberry Pi OS adds piwheels.org in /etc/pip.conf; from China it is often
+# very slow.  Set USE_PIWHEELS=1 to opt back in (useful on UK/EU networks).
+: "${USE_PIWHEELS:=0}"
 
+PIP_CONF_FILE="${INSTALL_DIR}/.pip.conf"
+{
+    echo "[global]"
+    echo "index-url = ${PIP_INDEX_URL}"
+    echo "timeout = ${PIP_DEFAULT_TIMEOUT}"
+    if [[ "${USE_PIWHEELS}" == "1" ]]; then
+        echo "extra-index-url = https://www.piwheels.org/simple"
+    fi
+} >"${PIP_CONF_FILE}"
+# When PIP_CONFIG_FILE is set, pip loads ONLY this file (not /etc/pip.conf).
+# Do NOT combine with --isolated — that flag ignores env vars and leaves
+# the system piwheels extra-index-url active.
+export PIP_CONFIG_FILE="${PIP_CONF_FILE}"
+
+PIP_TRUSTED_HOST=$(
+    python3 -c "from urllib.parse import urlparse; print(urlparse('${PIP_INDEX_URL}').hostname or '')"
+)
+PIP_ARGS=(
+    --index-url "${PIP_INDEX_URL}"
+    --timeout "${PIP_DEFAULT_TIMEOUT}"
+    --no-cache-dir
+)
+if [[ -n "${PIP_TRUSTED_HOST}" && "${PIP_TRUSTED_HOST}" != "pypi.org" ]]; then
+    PIP_ARGS+=(--trusted-host "${PIP_TRUSTED_HOST}")
+fi
+
+if [[ "${USE_PIWHEELS}" == "1" ]]; then
+    echo "    -> using PyPI mirror: ${PIP_INDEX_URL} + piwheels.org"
+else
+    echo "    -> using PyPI mirror: ${PIP_INDEX_URL} (piwheels disabled)"
+fi
+
+write_venv_pip_conf() {
+    # Site config inside the venv — belt-and-suspenders for venv/bin/pip.
+    if [[ -d "${INSTALL_DIR}/venv" ]]; then
+        cp "${PIP_CONF_FILE}" "${INSTALL_DIR}/venv/pip.conf"
+    fi
+}
+
+pip_install() {
+    "${PIP_BIN[@]}" cache purge >/dev/null 2>&1 || true
+    "${PIP_BIN[@]}" install "${PIP_ARGS[@]}" "$@"
+}
 if [[ "${NO_VENV:-0}" == "1" ]]; then
     echo ">>> NO_VENV=1; installing dependencies against system python3"
     mkdir -p "${INSTALL_DIR}/venv/bin"
     ln -sf "$(command -v python3)" "${INSTALL_DIR}/venv/bin/python"
     PIP_BIN=(python3 -m pip)
-    "${PIP_BIN[@]}" install --upgrade pip || true
-    "${PIP_BIN[@]}" install -r "${INSTALL_DIR}/requirements.txt"
+    write_venv_pip_conf
+    pip_install -r "${INSTALL_DIR}/requirements.txt"
 else
     echo ">>> Creating virtual-env at ${INSTALL_DIR}/venv"
     python3 -m venv "${INSTALL_DIR}/venv"
+    write_venv_pip_conf
     PIP_BIN=("${INSTALL_DIR}/venv/bin/pip")
-    "${PIP_BIN[@]}" install --upgrade pip
-    "${PIP_BIN[@]}" install -r "${INSTALL_DIR}/requirements.txt"
+    # venv ships a working pip; skip --upgrade pip to avoid slow downloads.
+    pip_install -r "${INSTALL_DIR}/requirements.txt"
 fi
 
 echo ">>> Installing web-pi-control.service"
