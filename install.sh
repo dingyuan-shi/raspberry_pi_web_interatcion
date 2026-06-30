@@ -14,13 +14,19 @@ fi
 SRC_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 INSTALL_DIR="/opt/pi-remote"
 
+PY_VER=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+PY_MAJOR=$(python3 -c 'import sys; print(sys.version_info.major)')
+PY_MINOR=$(python3 -c 'import sys; print(sys.version_info.minor)')
+if [[ "$PY_MAJOR" -lt 3 || ( "$PY_MAJOR" -eq 3 && "$PY_MINOR" -lt 11 ) ]]; then
+    echo "ERROR: Python 3.11+ required (found ${PY_VER})." >&2
+    echo "       Raspberry Pi OS Bookworm ships Python 3.11." >&2
+    exit 1
+fi
+echo ">>> Python ${PY_VER}"
+
 echo ">>> Checking system packages"
 PKGS=(python3 python3-venv python3-pip rsync)
-# chromium-browser is optional - only used by /api/cheap.png to render
-# the dashboard for Kindle / e-ink clients.  We list it so the installer
-# auto-pulls it when missing, but install will still succeed without.
-OPTIONAL_PKGS=(chromium-browser)
-
+# chromium is optional - only used by /api/cheap.png (see below).
 MISSING=()
 for p in "${PKGS[@]}"; do
     if ! dpkg -l "$p" 2>/dev/null | grep -q '^ii'; then
@@ -37,8 +43,9 @@ else
     if ! apt-get install -y "${MISSING[@]}"; then
         echo
         echo "ERROR: apt-get install failed for: ${MISSING[*]}"
-        echo "       Fix your apt sources (Raspbian Buster needs legacy.raspbian.org)"
-        echo "       or set NO_VENV=1 if only python3-venv is missing."
+        echo "       On Raspberry Pi OS Bookworm install python3-venv with:"
+        echo "         sudo apt-get install python3-venv"
+        echo "       or set NO_VENV=1 if you prefer the system python3."
         exit 1
     fi
 fi
@@ -51,8 +58,10 @@ if ! command -v chromium-browser >/dev/null 2>&1 \
    && ! command -v google-chrome >/dev/null 2>&1 \
    && ! command -v google-chrome-stable >/dev/null 2>&1; then
     echo ">>> chromium not found; attempting to install (needed for /cheap)"
-    apt-get install -y "${OPTIONAL_PKGS[@]}" \
-        || echo "WARNING: could not install chromium-browser; /api/cheap.png will be disabled"
+    if ! apt-get install -y chromium; then
+        apt-get install -y chromium-browser \
+            || echo "WARNING: could not install chromium; /api/cheap.png will be disabled"
+    fi
 fi
 
 echo ">>> Copying source to ${INSTALL_DIR}"
@@ -77,7 +86,7 @@ rsync -a --delete \
 # Use a China-friendly PyPI mirror by default; override with PIP_INDEX_URL.
 : "${PIP_INDEX_URL:=https://pypi.tuna.tsinghua.edu.cn/simple}"
 export PIP_INDEX_URL
-# Raspbian's stock /etc/pip.conf adds piwheels.org as an extra-index-url.
+# Raspberry Pi OS may add piwheels.org as an extra-index-url in /etc/pip.conf.
 # That mirror is in the UK and frequently times out from China, so disable
 # it unless the caller deliberately set PIP_EXTRA_INDEX_URL themselves.
 : "${PIP_EXTRA_INDEX_URL:=}"
