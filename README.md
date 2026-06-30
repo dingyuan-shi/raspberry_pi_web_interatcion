@@ -69,6 +69,14 @@ sudo systemctl restart web-pi-control
 
 浏览器访问 `http://<树莓派IP>:8080`。
 
+安装时 pip 默认走清华镜像，并**禁用**树莓派系统自带的 `piwheels.org`（国内访问很慢）。若你在英国/欧洲且想用 piwheels 预编译包：
+
+```bash
+sudo USE_PIWHEELS=1 ./install.sh
+```
+
+自定义镜像：`sudo PIP_INDEX_URL=https://pypi.org/simple ./install.sh`
+
 卸载：`sudo ./uninstall.sh`
 
 ---

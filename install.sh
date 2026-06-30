@@ -83,31 +83,58 @@ rsync -a --delete \
     --exclude '.git' --exclude '.venv' --exclude 'venv' --exclude '__pycache__' \
     "${SRC_DIR}/" "${INSTALL_DIR}/"
 
-# Use a China-friendly PyPI mirror by default; override with PIP_INDEX_URL.
+# PyPI index (China-friendly default). Override: PIP_INDEX_URL=https://pypi.org/simple
 : "${PIP_INDEX_URL:=https://pypi.tuna.tsinghua.edu.cn/simple}"
-export PIP_INDEX_URL
-# Raspberry Pi OS may add piwheels.org as an extra-index-url in /etc/pip.conf.
-# That mirror is in the UK and frequently times out from China, so disable
-# it unless the caller deliberately set PIP_EXTRA_INDEX_URL themselves.
-: "${PIP_EXTRA_INDEX_URL:=}"
-export PIP_EXTRA_INDEX_URL
 : "${PIP_DEFAULT_TIMEOUT:=120}"
-export PIP_DEFAULT_TIMEOUT
-echo "    -> using PyPI mirror: ${PIP_INDEX_URL}"
+# Raspberry Pi OS adds piwheels.org in /etc/pip.conf; from China it is often
+# very slow.  Set USE_PIWHEELS=1 to opt back in (useful on UK/EU networks).
+: "${USE_PIWHEELS:=0}"
 
+PIP_CONF_FILE="${INSTALL_DIR}/.pip.conf"
+{
+    echo "[global]"
+    echo "index-url = ${PIP_INDEX_URL}"
+    echo "timeout = ${PIP_DEFAULT_TIMEOUT}"
+    if [[ "${USE_PIWHEELS}" == "1" ]]; then
+        echo "extra-index-url = https://www.piwheels.org/simple"
+    fi
+} >"${PIP_CONF_FILE}"
+export PIP_CONFIG_FILE="${PIP_CONF_FILE}"
+
+PIP_TRUSTED_HOST=$(
+    python3 -c "from urllib.parse import urlparse; print(urlparse('${PIP_INDEX_URL}').hostname or '')"
+)
+PIP_ARGS=(--index-url "${PIP_INDEX_URL}" --timeout "${PIP_DEFAULT_TIMEOUT}")
+if [[ -n "${PIP_TRUSTED_HOST}" && "${PIP_TRUSTED_HOST}" != "pypi.org" ]]; then
+    PIP_ARGS+=(--trusted-host "${PIP_TRUSTED_HOST}")
+fi
+if [[ "${USE_PIWHEELS}" != "1" ]]; then
+    # Ignore /etc/pip.conf extra-index-url (piwheels) even if env vars do not.
+    PIP_ARGS+=(--isolated)
+fi
+
+if [[ "${USE_PIWHEELS}" == "1" ]]; then
+    echo "    -> using PyPI mirror: ${PIP_INDEX_URL} + piwheels.org"
+else
+    echo "    -> using PyPI mirror: ${PIP_INDEX_URL} (piwheels disabled)"
+fi
+
+pip_install() {
+    "${PIP_BIN[@]}" install "${PIP_ARGS[@]}" "$@"
+}
 if [[ "${NO_VENV:-0}" == "1" ]]; then
     echo ">>> NO_VENV=1; installing dependencies against system python3"
     mkdir -p "${INSTALL_DIR}/venv/bin"
     ln -sf "$(command -v python3)" "${INSTALL_DIR}/venv/bin/python"
     PIP_BIN=(python3 -m pip)
-    "${PIP_BIN[@]}" install --upgrade pip || true
-    "${PIP_BIN[@]}" install -r "${INSTALL_DIR}/requirements.txt"
+    pip_install --upgrade pip || true
+    pip_install -r "${INSTALL_DIR}/requirements.txt"
 else
     echo ">>> Creating virtual-env at ${INSTALL_DIR}/venv"
     python3 -m venv "${INSTALL_DIR}/venv"
     PIP_BIN=("${INSTALL_DIR}/venv/bin/pip")
-    "${PIP_BIN[@]}" install --upgrade pip
-    "${PIP_BIN[@]}" install -r "${INSTALL_DIR}/requirements.txt"
+    pip_install --upgrade pip
+    pip_install -r "${INSTALL_DIR}/requirements.txt"
 fi
 
 echo ">>> Installing web-pi-control.service"
