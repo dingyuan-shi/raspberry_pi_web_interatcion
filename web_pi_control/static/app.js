@@ -190,6 +190,13 @@ const quickRoot = document.getElementById('quick-buttons');
 let commandButtons = [];
 let editingButtonId = null;
 
+function newButtonId() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `btn-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 function escapeHtml(s) {
   return String(s)
     .replace(/&/g, '&amp;')
@@ -370,8 +377,14 @@ btnEditForm.addEventListener('submit', async (ev) => {
     btnEditErr.textContent = '请填写按钮文字和执行命令';
     return;
   }
+  const submitBtn = btnEditForm.querySelector('button[type="submit"]');
+  const prevLabel = submitBtn ? submitBtn.textContent : '';
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.textContent = '保存中…';
+  }
   const next = {
-    id: editingButtonId || crypto.randomUUID(),
+    id: editingButtonId || newButtonId(),
     label,
     command,
     danger,
@@ -386,8 +399,13 @@ btnEditForm.addEventListener('submit', async (ev) => {
     closeButtonEditor();
     renderManageList();
   } catch (e) {
-    btnEditErr.textContent = String(e);
+    btnEditErr.textContent = String(e.message || e);
     await loadCommandButtons();
+  } finally {
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = prevLabel || '保存';
+    }
   }
 });
 
