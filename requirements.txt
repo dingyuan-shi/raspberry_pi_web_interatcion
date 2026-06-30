@@ -1,0 +1,20 @@
+# Pinned for Python 3.7 (Raspbian Buster ships 3.7.3).
+# Bump everything when the OS is upgraded to Bullseye/Bookworm.
+
+psutil>=5.9.0,<6.0
+
+# Last FastAPI release supporting Python 3.7 (uses starlette<0.28 and
+# pydantic v1).  Keep starlette / anyio / pydantic floating within the
+# ranges FastAPI 0.103 declares so pip can resolve quickly.
+fastapi==0.103.2
+pydantic>=1.10,<2.0
+anyio>=3.7,<4.0
+
+# `uvicorn[standard]` would pull in uvloop/httptools/watchfiles, which
+# have C extensions and often require building from source on armv6/v7.
+# Plain uvicorn + websockets is pure-Python and installs instantly.
+uvicorn>=0.22,<0.23
+websockets>=10.4,<12
+
+# For Form() parsing on /login.
+python-multipart>=0.0.6,<0.1

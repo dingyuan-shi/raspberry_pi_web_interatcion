@@ -1,0 +1,22 @@
+[Unit]
+Description=Web remote control service for Raspberry Pi
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/pi-remote
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-/etc/default/web-pi-control
+ExecStart=/opt/pi-remote/venv/bin/python -m web_pi_control
+Restart=on-failure
+RestartSec=3
+
+NoNewPrivileges=true
+ProtectSystem=full
+# Leave ProtectHome off because users will typically `cd ~` inside the PTY.
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

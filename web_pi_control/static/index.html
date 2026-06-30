@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Pi Remote Control</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
+<link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+<header>
+  <h1>Pi Remote Control</h1>
+  <div class="status-pills">
+    <span class="pill" id="pill-host">host=?</span>
+    <span class="pill" id="pill-ip">ip=?</span>
+    <span class="pill" id="pill-cpu">cpu=?</span>
+    <span class="pill" id="pill-mem">mem=?</span>
+    <span class="pill" id="pill-temp">temp=?</span>
+    <span class="pill" id="pill-up">up=?</span>
+  </div>
+  <div class="header-actions">
+    <a href="/lite" class="ghost lite-link" title="SVG 监控页（电脑浏览器）">Lite</a>
+    <a href="/cheap" class="ghost lite-link" title="PNG 监控页（Kindle）">Cheap</a>
+    <span class="badge" id="auth-badge" hidden>已部署</span>
+    <button id="btn-deploy" class="primary">Deploy</button>
+    <button id="btn-logout" class="ghost" hidden>退出</button>
+  </div>
+</header>
+
+<main>
+  <nav class="tabs">
+    <button data-tab="monitor" class="active">监控</button>
+    <button data-tab="commands" data-auth class="locked">命令 <span class="lock">🔒</span></button>
+    <button data-tab="terminal" data-auth class="locked">交互终端 <span class="lock">🔒</span></button>
+  </nav>
+
+  <section id="tab-monitor" class="tab visible">
+    <div class="monitor-grid">
+      <div class="card">
+        <h2>CPU 占用</h2>
+        <div class="chart-wrap"><canvas id="chart-cpu"></canvas></div>
+        <div class="meta" id="cpu-meta">load: ?  cores: ?</div>
+      </div>
+
+      <div class="card">
+        <h2>内存</h2>
+        <div class="chart-wrap"><canvas id="chart-mem"></canvas></div>
+        <div class="meta" id="mem-meta">used: ?  swap: ?</div>
+      </div>
+
+      <div class="card">
+        <h2>温度 (°C)</h2>
+        <div class="chart-wrap"><canvas id="chart-temp"></canvas></div>
+        <div class="meta" id="temp-meta">cur: ?</div>
+      </div>
+
+      <div class="card">
+        <h2>网络吞吐 (KB/s)</h2>
+        <div class="chart-wrap"><canvas id="chart-net"></canvas></div>
+        <div class="meta" id="net-meta">↓0  ↑0</div>
+      </div>
+
+      <div class="card wide">
+        <h2>磁盘</h2>
+        <div id="disks"></div>
+      </div>
+
+      <div class="card wide">
+        <h2>Top 进程（按 CPU%）</h2>
+        <table class="proc-table">
+          <thead><tr><th>PID</th><th>用户</th><th>命令</th><th>CPU%</th><th>MEM%</th></tr></thead>
+          <tbody id="procs"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section id="tab-commands" class="tab">
+    <div class="card">
+      <h2>发送命令</h2>
+      <p class="muted">
+        支持 <code>help</code> / <code>status</code> / <code>ip</code> / <code>uptime</code> /
+        <code>reboot</code> / <code>shutdown</code> /
+        <code>gpio:&lt;pin&gt;:on|off|toggle|read</code> /
+        <code>shell:&lt;cmd&gt;</code>。登录态下 <code>shell:</code> 无需 <code>auth:</code>。
+      </p>
+      <form id="cmd-form" class="row">
+        <input type="text" id="cmd-input" placeholder="例如：status 或 shell:vcgencmd measure_temp" autocomplete="off" />
+        <button type="submit">执行</button>
+      </form>
+      <div class="quick">
+        <button data-cmd="status">status</button>
+        <button data-cmd="help">help</button>
+        <button data-cmd="ip">ip</button>
+        <button data-cmd="uptime">uptime</button>
+        <button data-cmd="shell:uname -a">uname -a</button>
+        <button data-cmd="shell:df -h">df -h</button>
+        <button data-cmd="shell:free -h">free -h</button>
+        <button data-cmd="shell:vcgencmd measure_temp">measure_temp</button>
+        <button data-cmd="reboot" class="danger">reboot</button>
+        <button data-cmd="shutdown" class="danger">shutdown</button>
+      </div>
+      <pre id="cmd-output" aria-live="polite"></pre>
+    </div>
+  </section>
+
+  <section id="tab-terminal" class="tab">
+    <div class="card terminal-card">
+      <h2>交互式 Shell</h2>
+      <p class="muted">通过 WebSocket 直连 PTY，提供完整 bash 交互。</p>
+      <div id="terminal"></div>
+    </div>
+  </section>
+</main>
+
+<!-- Deploy / login modal -->
+<div id="login-modal" class="modal" hidden>
+  <div class="modal-card">
+    <h2>Deploy</h2>
+    <p class="muted">输入访问密码以解锁命令和终端</p>
+    <form id="login-form">
+      <input type="password" id="login-password" placeholder="密码" autocomplete="current-password" required />
+      <div class="modal-actions">
+        <button type="button" id="login-cancel" class="ghost">取消</button>
+        <button type="submit" class="primary">登录</button>
+      </div>
+      <p id="login-err" class="err"></p>
+    </form>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>
