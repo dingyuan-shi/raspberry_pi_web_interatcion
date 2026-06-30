@@ -138,13 +138,21 @@
 
 <!-- Add / edit single command button -->
 <div id="btn-edit-modal" class="modal" hidden>
-  <div class="modal-card">
+  <div class="modal-card modal-wide">
     <h2 id="btn-edit-title">添加按钮</h2>
     <form id="btn-edit-form">
       <label class="field-label" for="btn-edit-label">按钮文字</label>
       <input type="text" id="btn-edit-label" placeholder="例如：查看温度" maxlength="40" required />
       <label class="field-label" for="btn-edit-command">执行命令</label>
-      <input type="text" id="btn-edit-command" placeholder="例如：shell:vcgencmd measure_temp" maxlength="500" required />
+      <input type="text" id="btn-edit-command" placeholder="例如：shell:echo ${paraA}" maxlength="500" required />
+      <p class="muted field-hint">命令中可用 <code>${参数名}</code> 引用下方定义的参数，例如参数名 <code>paraA</code> 对应 <code>${paraA}</code></p>
+      <div class="btn-edit-params">
+        <div class="field-label-row">
+          <span class="field-label">参数</span>
+          <button type="button" id="btn-edit-param-add" class="ghost btn-sm">添加参数</button>
+        </div>
+        <div id="btn-edit-params-list" class="btn-edit-params-list"></div>
+      </div>
       <label class="checkbox-row">
         <input type="checkbox" id="btn-edit-danger" />
         危险操作（执行前确认）
@@ -154,6 +162,21 @@
         <button type="submit" class="primary">保存</button>
       </div>
       <p id="btn-edit-err" class="err"></p>
+    </form>
+  </div>
+</div>
+
+<!-- Run command with parameter values -->
+<div id="btn-run-modal" class="modal" hidden>
+  <div class="modal-card">
+    <h2 id="btn-run-title">填写参数</h2>
+    <form id="btn-run-form">
+      <div id="btn-run-fields"></div>
+      <div class="modal-actions">
+        <button type="button" id="btn-run-cancel" class="ghost">取消</button>
+        <button type="submit" class="primary">执行</button>
+      </div>
+      <p id="btn-run-err" class="err"></p>
     </form>
   </div>
 </div>

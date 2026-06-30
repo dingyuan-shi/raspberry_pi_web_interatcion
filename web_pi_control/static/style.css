@@ -255,12 +255,24 @@ button.btn-sm { padding: 6px 12px; font-size: 13px; font-weight: 500; }
   border-radius: 8px;
   background: var(--panel-2);
 }
+.btn-manage-order {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.btn-manage-order button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
 .btn-manage-info {
   display: flex;
   flex-direction: column;
   gap: 4px;
   min-width: 0;
+  flex: 1;
 }
+.btn-manage-info .manage-meta { font-size: 12px; }
 .btn-manage-info strong { font-size: 14px; }
 .btn-manage-info code {
   font-size: 12px;
@@ -279,6 +291,40 @@ button.btn-sm { padding: 6px 12px; font-size: 13px; font-weight: 500; }
   align-self: flex-start;
 }
 button.danger-text { color: var(--danger); }
+
+.field-hint {
+  font-size: 12px;
+  margin: -6px 0 12px;
+}
+.field-hint code { font-size: 11px; }
+
+.btn-edit-params { margin-bottom: 12px; }
+.field-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.btn-edit-params-list .muted { font-size: 12px; margin: 0; }
+.btn-param-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr auto;
+  gap: 8px;
+  margin-bottom: 8px;
+  align-items: center;
+}
+.btn-param-row input { margin-bottom: 0; }
+@media (max-width: 640px) {
+  .btn-param-row { grid-template-columns: 1fr 1fr; }
+  .btn-param-row .param-default { grid-column: 1 / -1; }
+  .btn-param-row .param-remove { justify-self: end; }
+}
+
+.field-block {
+  display: block;
+  margin-bottom: 12px;
+}
+.field-block input { width: 100%; }
 
 pre#cmd-output {
   background: #f9fafb;
