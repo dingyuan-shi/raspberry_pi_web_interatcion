@@ -32,6 +32,8 @@ function applyAuthState(isAuthed) {
     if (active && active.hasAttribute('data-auth')) selectTab('monitor');
   }
   loadCommandButtons();
+  const btnManagePanels = document.getElementById('btn-manage-panels');
+  if (btnManagePanels) btnManagePanels.hidden = !authenticated;
 }
 
 function selectTab(name) {
@@ -829,15 +831,326 @@ function initTerminal() {
 }
 
 // ---------------------------------------------------------------------------
-// Monitor tab (public, default view) — Chart.js
+// Monitor panels (persisted layout + extraction config)
+// ---------------------------------------------------------------------------
+
+const monitorGrid = document.getElementById('monitor-grid');
+const btnManagePanels = document.getElementById('btn-manage-panels');
+const panelManageModal = document.getElementById('panel-manage-modal');
+const panelManageList = document.getElementById('panel-manage-list');
+const panelManageErr = document.getElementById('panel-manage-err');
+const panelEditModal = document.getElementById('panel-edit-modal');
+const panelEditForm = document.getElementById('panel-edit-form');
+const panelEditTitle = document.getElementById('panel-edit-title');
+const panelEditLabel = document.getElementById('panel-edit-label');
+const panelEditCommand = document.getElementById('panel-edit-command');
+const panelEditParse = document.getElementById('panel-edit-parse');
+const panelEditParseArg = document.getElementById('panel-edit-parse-arg');
+const panelEditDisplay = document.getElementById('panel-edit-display');
+const panelEditUnit = document.getElementById('panel-edit-unit');
+const panelEditColor = document.getElementById('panel-edit-color');
+const panelEditWide = document.getElementById('panel-edit-wide');
+const panelEditErr = document.getElementById('panel-edit-err');
+let monitorPanels = [];
+let editingPanelId = null;
+let panelPointerDrag = null;
+
+function panelDomId(panelId) {
+  return String(panelId).replace(/[^a-zA-Z0-9_-]/g, '_');
+}
+
+function syncPanelEditUi() {
+  const display = panelEditDisplay.value;
+  panelEditForm.querySelectorAll('.panel-chart-only').forEach((el) => {
+    el.hidden = display !== 'chart';
+  });
+  if (display === 'disks') panelEditParse.value = 'df';
+  if (display === 'table') panelEditParse.value = 'ps';
+  if (display === 'chart' && panelEditParse.value === 'df') panelEditParse.value = 'float';
+  if (display === 'chart' && panelEditParse.value === 'ps') panelEditParse.value = 'float';
+  if (display === 'text' && !['text', 'regex'].includes(panelEditParse.value)) {
+    panelEditParse.value = 'text';
+  }
+  panelEditParseArg.disabled = panelEditParse.value !== 'regex';
+  panelEditCommand.placeholder = '例如：vcgencmd measure_temp 或 cat /proc/net/dev';
+}
+
+panelEditParse.addEventListener('change', syncPanelEditUi);
+panelEditDisplay.addEventListener('change', syncPanelEditUi);
+
+function panelSummary(panel) {
+  const cmd = panel.command.length > 40 ? `${panel.command.slice(0, 40)}…` : panel.command;
+  return `${panel.parse} · ${panel.display} · ${cmd}`;
+}
+
+function clearPanelDragOver() {
+  document.querySelectorAll('.panel-manage-row.drag-over').forEach((el) => el.classList.remove('drag-over'));
+}
+
+function panelRowAtPoint(x, y, ignoreRow) {
+  if (ignoreRow) ignoreRow.style.pointerEvents = 'none';
+  const el = document.elementFromPoint(x, y);
+  if (ignoreRow) ignoreRow.style.pointerEvents = '';
+  return el?.closest('.panel-manage-row') || null;
+}
+
+function attachPanelDragHandle(handle, row, panel) {
+  handle.addEventListener('pointerdown', (ev) => {
+    if (ev.button !== 0) return;
+    ev.preventDefault();
+    panelPointerDrag = { sourceId: panel.id, row, pointerId: ev.pointerId, handle };
+    row.classList.add('dragging');
+    handle.setPointerCapture(ev.pointerId);
+  });
+
+  handle.addEventListener('pointermove', (ev) => {
+    if (!panelPointerDrag || panelPointerDrag.pointerId !== ev.pointerId) return;
+    clearPanelDragOver();
+    const target = panelRowAtPoint(ev.clientX, ev.clientY, panelPointerDrag.row);
+    if (target && target.dataset.id !== panelPointerDrag.sourceId) {
+      target.classList.add('drag-over');
+    }
+  });
+
+  const finishDrag = async (ev) => {
+    if (!panelPointerDrag || panelPointerDrag.pointerId !== ev.pointerId) return;
+    const { sourceId, row: srcRow, handle: h } = panelPointerDrag;
+    const target = panelRowAtPoint(ev.clientX, ev.clientY, srcRow);
+    clearPanelDragOver();
+    srcRow.classList.remove('dragging');
+    panelPointerDrag = null;
+    try { h.releasePointerCapture(ev.pointerId); } catch (_) { /* already released */ }
+    if (target) {
+      const targetId = target.dataset.id;
+      if (targetId && targetId !== sourceId) {
+        await reorderPanelByDrag(sourceId, targetId);
+      }
+    }
+  };
+
+  handle.addEventListener('pointerup', finishDrag);
+  handle.addEventListener('pointercancel', finishDrag);
+}
+
+function buildPanelManageRow(panel) {
+  const row = document.createElement('div');
+  row.className = 'btn-manage-row panel-manage-row';
+  row.dataset.id = panel.id;
+  row.innerHTML = `
+    <span class="drag-handle" role="button" tabindex="0" title="拖动排序" aria-label="拖动排序">≡</span>
+    <div class="btn-manage-info">
+      <strong>${escapeHtml(panel.label)}</strong>
+      <code class="cmd-preview" title="${escapeHtml(panel.command)}">${escapeHtml(panelSummary(panel))}</code>
+      ${panel.wide ? '<span class="badge">宽面板</span>' : ''}
+    </div>
+    <div class="btn-manage-actions">
+      <button type="button" class="ghost btn-sm" data-action="copy">复制</button>
+      <button type="button" class="ghost btn-sm" data-action="edit">编辑</button>
+      <button type="button" class="ghost btn-sm danger-text" data-action="delete">删除</button>
+    </div>`;
+  attachPanelDragHandle(row.querySelector('.drag-handle'), row, panel);
+  row.querySelector('[data-action="edit"]').addEventListener('click', () => openPanelEditor(panel.id));
+  row.querySelector('[data-action="copy"]').addEventListener('click', () => copyMonitorPanel(panel.id));
+  row.querySelector('[data-action="delete"]').addEventListener('click', () => deleteMonitorPanel(panel.id));
+  return row;
+}
+
+function renderPanelManageList() {
+  panelManageList.innerHTML = monitorPanels.length ? '' : '<p class="muted">暂无面板。</p>';
+  monitorPanels.forEach((panel) => panelManageList.appendChild(buildPanelManageRow(panel)));
+}
+
+async function loadMonitorPanelConfig() {
+  try {
+    const resp = await fetch('/api/monitor-panels');
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const body = await resp.json();
+    monitorPanels = Array.isArray(body.panels) ? body.panels : [];
+  } catch (e) {
+    monitorPanels = [];
+    if (monitorGrid) {
+      monitorGrid.innerHTML = `<p class="err">加载面板配置失败：${escapeHtml(e)}</p>`;
+    }
+  }
+}
+
+async function persistMonitorPanels() {
+  const resp = await fetch('/api/monitor-panels', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ panels: monitorPanels }),
+  });
+  if (resp.status === 401) {
+    applyAuthState(false);
+    openLoginModal();
+    throw new Error('未登录');
+  }
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => ({}));
+    throw new Error(body.detail || `HTTP ${resp.status}`);
+  }
+  const body = await resp.json();
+  monitorPanels = body.panels || monitorPanels;
+  await refreshMonitorUi();
+}
+
+async function reorderPanelByDrag(sourceId, targetId) {
+  const from = monitorPanels.findIndex((p) => p.id === sourceId);
+  const to = monitorPanels.findIndex((p) => p.id === targetId);
+  if (from < 0 || to < 0 || from === to) return;
+  const list = [...monitorPanels];
+  const [item] = list.splice(from, 1);
+  list.splice(to, 0, item);
+  monitorPanels = list;
+  panelManageErr.textContent = '';
+  try {
+    await persistMonitorPanels();
+    renderPanelManageList();
+  } catch (e) {
+    panelManageErr.textContent = String(e.message || e);
+    await loadMonitorPanelConfig();
+    renderPanelManageList();
+    await refreshMonitorUi();
+  }
+}
+
+function openPanelManager() {
+  if (!authenticated) { openLoginModal(); return; }
+  panelManageErr.textContent = '';
+  renderPanelManageList();
+  panelManageModal.hidden = false;
+}
+
+function closePanelManager() {
+  panelManageModal.hidden = true;
+}
+
+function openPanelEditor(id, template = null) {
+  editingPanelId = id || null;
+  panelEditErr.textContent = '';
+  const source = template || (editingPanelId ? monitorPanels.find((p) => p.id === editingPanelId) : null);
+  if (editingPanelId && !source) return;
+  if (template) {
+    panelEditTitle.textContent = '复制面板';
+    panelEditLabel.value = source.label.length > 36 ? `${source.label.slice(0, 36)} 副本` : `${source.label} 副本`;
+    panelEditCommand.value = source.command;
+    panelEditParse.value = source.parse || 'float';
+    panelEditParseArg.value = source.parse_arg || '';
+    panelEditDisplay.value = source.display || 'chart';
+    panelEditUnit.value = source.unit || '';
+    panelEditColor.value = source.color || '';
+    panelEditWide.checked = !!source.wide;
+  } else if (editingPanelId && source) {
+    panelEditTitle.textContent = '编辑面板';
+    panelEditLabel.value = source.label;
+    panelEditCommand.value = source.command;
+    panelEditParse.value = source.parse || 'float';
+    panelEditParseArg.value = source.parse_arg || '';
+    panelEditDisplay.value = source.display || 'chart';
+    panelEditUnit.value = source.unit || '';
+    panelEditColor.value = source.color || '';
+    panelEditWide.checked = !!source.wide;
+  } else {
+    panelEditTitle.textContent = '添加面板';
+    panelEditLabel.value = '';
+    panelEditCommand.value = '';
+    panelEditParse.value = 'float';
+    panelEditParseArg.value = '';
+    panelEditDisplay.value = 'chart';
+    panelEditUnit.value = '';
+    panelEditColor.value = '#059669';
+    panelEditWide.checked = false;
+  }
+  syncPanelEditUi();
+  panelEditModal.hidden = false;
+  setTimeout(() => panelEditLabel.focus(), 30);
+}
+
+function copyMonitorPanel(id) {
+  const panel = monitorPanels.find((p) => p.id === id);
+  if (!panel) return;
+  openPanelEditor(null, panel);
+}
+
+function closePanelEditor() {
+  panelEditModal.hidden = true;
+  editingPanelId = null;
+}
+
+async function deleteMonitorPanel(id) {
+  const panel = monitorPanels.find((p) => p.id === id);
+  if (!panel) return;
+  if (!window.confirm(`删除「${panel.label}」？`)) return;
+  panelManageErr.textContent = '';
+  monitorPanels = monitorPanels.filter((p) => p.id !== id);
+  try {
+    await persistMonitorPanels();
+    renderPanelManageList();
+  } catch (e) {
+    panelManageErr.textContent = String(e.message || e);
+    await loadMonitorPanelConfig();
+    renderPanelManageList();
+    await refreshMonitorUi();
+  }
+}
+
+btnManagePanels.addEventListener('click', openPanelManager);
+document.getElementById('panel-manage-close').addEventListener('click', closePanelManager);
+document.getElementById('panel-manage-add').addEventListener('click', () => openPanelEditor(null));
+document.getElementById('panel-edit-cancel').addEventListener('click', closePanelEditor);
+panelManageModal.addEventListener('click', (ev) => { if (ev.target === panelManageModal) closePanelManager(); });
+panelEditModal.addEventListener('click', (ev) => { if (ev.target === panelEditModal) closePanelEditor(); });
+
+panelEditForm.addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  panelEditErr.textContent = '';
+  const panel = {
+    id: editingPanelId || newButtonId(),
+    label: panelEditLabel.value.trim(),
+    command: panelEditCommand.value.trim(),
+    parse: panelEditParse.value,
+    parse_arg: panelEditParseArg.value.trim(),
+    display: panelEditDisplay.value,
+    unit: panelEditUnit.value.trim(),
+    color: panelEditColor.value.trim(),
+    wide: panelEditWide.checked,
+  };
+  if (!panel.label || !panel.command) {
+    panelEditErr.textContent = '请填写面板标题和 Shell 命令';
+    return;
+  }
+  if (panel.parse === 'regex' && !panel.parse_arg) {
+    panelEditErr.textContent = '正则提炼需要填写表达式';
+    return;
+  }
+  if (editingPanelId) {
+    monitorPanels = monitorPanels.map((p) => (p.id === editingPanelId ? { ...p, ...panel, id: editingPanelId } : p));
+  } else {
+    monitorPanels = [...monitorPanels, panel];
+  }
+  try {
+    await persistMonitorPanels();
+    closePanelEditor();
+    renderPanelManageList();
+  } catch (e) {
+    panelEditErr.textContent = String(e.message || e);
+    await loadMonitorPanelConfig();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Monitor tab (public, default view) — Chart.js + custom panels
 // ---------------------------------------------------------------------------
 
 const MAX_POINTS = 60;
 let monitorReady = false;
-let charts = {};
+let monitorCharts = {};
+let monitorStreamStarted = false;
 
 function makeChart(canvasId, label, color, unit = '%') {
-  const ctx = document.getElementById(canvasId).getContext('2d');
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return null;
+  const ctx = canvas.getContext('2d');
   return new window.Chart(ctx, {
     type: 'line',
     data: {
@@ -845,8 +1158,8 @@ function makeChart(canvasId, label, color, unit = '%') {
       datasets: [{
         label,
         data: [],
-        borderColor: color,
-        backgroundColor: color + '33',
+        borderColor: color || '#059669',
+        backgroundColor: (color || '#059669') + '33',
         borderWidth: 1.5,
         pointRadius: 0,
         tension: 0.25,
@@ -871,6 +1184,7 @@ function makeChart(canvasId, label, color, unit = '%') {
 }
 
 function pushPoint(chart, value) {
+  if (!chart || value == null) return;
   const ts = new Date().toLocaleTimeString();
   chart.data.labels.push(ts);
   chart.data.datasets[0].data.push(value);
@@ -885,12 +1199,15 @@ function humanBytes(n) {
   if (n == null) return '?';
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];
   let i = 0;
-  while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
-  return `${n.toFixed(n < 10 ? 1 : 0)} ${units[i]}`;
+  let val = n;
+  while (val >= 1024 && i < units.length - 1) { val /= 1024; i++; }
+  return `${val.toFixed(val < 10 ? 1 : 0)} ${units[i]}`;
 }
 
-function renderDisks(disks) {
-  const root = document.getElementById('disks');
+function renderDisksInto(rootId, disks) {
+  const root = document.getElementById(rootId);
+  if (!root) return;
+  root.className = 'disk-list';
   if (!disks || !disks.length) { root.innerHTML = '<p class="muted">无可读分区</p>'; return; }
   root.innerHTML = disks.map((d) => {
     const cls = d.percent > 90 ? 'danger' : d.percent > 75 ? 'warn' : '';
@@ -903,8 +1220,9 @@ function renderDisks(disks) {
   }).join('');
 }
 
-function renderProcs(top) {
-  const tbody = document.getElementById('procs');
+function renderProcsInto(rootId, top) {
+  const tbody = document.getElementById(rootId);
+  if (!tbody) return;
   if (!top || !top.length) { tbody.innerHTML = '<tr><td colspan="5" class="muted">无数据</td></tr>'; return; }
   tbody.innerHTML = top.map((p) => `
     <tr>
@@ -916,54 +1234,115 @@ function renderProcs(top) {
     </tr>`).join('');
 }
 
-function applyMonitor(snap) {
-  if (snap.cpu_pct != null) pushPoint(charts.cpu, snap.cpu_pct);
-  if (snap.memory && snap.memory.percent != null) pushPoint(charts.mem, snap.memory.percent);
-  if (snap.temp_c != null) pushPoint(charts.temp, snap.temp_c);
-
-  const nic = (snap.net || []).find((n) => n.rx_bps != null || n.tx_bps != null);
-  const rxKB = nic && nic.rx_bps != null ? nic.rx_bps / 1024 : 0;
-  const txKB = nic && nic.tx_bps != null ? nic.tx_bps / 1024 : 0;
-  pushPoint(charts.net, +(rxKB + txKB).toFixed(2));
-  document.getElementById('net-meta').textContent =
-    `${nic ? nic.nic : '?'}  ↓${rxKB.toFixed(1)} KB/s  ↑${txKB.toFixed(1)} KB/s`;
-
-  const load = snap.load ? snap.load.map((x) => x.toFixed(2)).join(' / ') : '?';
-  const cores = (snap.cpu_per_core || []).map((v) => v.toFixed(0) + '%').join(' ');
-  document.getElementById('cpu-meta').textContent = `load: ${load}   cores: ${cores || '?'}`;
-
-  if (snap.memory) {
-    document.getElementById('mem-meta').textContent =
-      `used ${humanBytes(snap.memory.used)} / ${humanBytes(snap.memory.total)} (${snap.memory.percent.toFixed(1)}%)` +
-      `  ·  swap ${humanBytes(snap.memory.swap_used)} / ${humanBytes(snap.memory.swap_total)} (${snap.memory.swap_percent.toFixed(1)}%)`;
+function renderMonitorGrid() {
+  if (!monitorGrid) return;
+  if (!monitorPanels.length) {
+    monitorGrid.innerHTML = '<p class="muted">暂无监控面板。</p>';
+    return;
   }
-
-  document.getElementById('temp-meta').textContent =
-    snap.temp_c != null ? `cur: ${snap.temp_c.toFixed(1)} °C` : 'cur: ?';
-
-  renderDisks(snap.disks);
-  renderProcs(snap.top);
+  monitorGrid.innerHTML = monitorPanels.map((panel) => {
+    const domId = panelDomId(panel.id);
+    const wide = panel.wide ? ' wide' : '';
+    if (panel.display === 'disks') {
+      return `
+        <div class="card${wide}" data-panel-id="${escapeHtml(panel.id)}">
+          <h2>${escapeHtml(panel.label)}</h2>
+          <div class="disk-list" id="disks-panel-${domId}"></div>
+        </div>`;
+    }
+    if (panel.display === 'table') {
+      return `
+        <div class="card${wide}" data-panel-id="${escapeHtml(panel.id)}">
+          <h2>${escapeHtml(panel.label)}</h2>
+          <table class="proc-table">
+            <thead><tr><th>PID</th><th>用户</th><th>命令</th><th>CPU%</th><th>MEM%</th></tr></thead>
+            <tbody id="procs-panel-${domId}"></tbody>
+          </table>
+        </div>`;
+    }
+    if (panel.display === 'text') {
+      return `
+        <div class="card${wide}" data-panel-id="${escapeHtml(panel.id)}">
+          <h2>${escapeHtml(panel.label)}</h2>
+          <div class="panel-text" id="text-panel-${domId}">—</div>
+          <div class="meta" id="meta-panel-${domId}">—</div>
+        </div>`;
+    }
+    return `
+      <div class="card${wide}" data-panel-id="${escapeHtml(panel.id)}">
+        <h2>${escapeHtml(panel.label)}</h2>
+        <div class="chart-wrap"><canvas id="chart-panel-${domId}"></canvas></div>
+        <div class="meta" id="meta-panel-${domId}">—</div>
+      </div>`;
+  }).join('');
 }
 
-function initMonitor() {
-  if (monitorReady) return;
-  monitorReady = true;
+function initMonitorCharts() {
+  monitorCharts = {};
+  monitorPanels.forEach((panel) => {
+    if (panel.display !== 'chart') return;
+    const domId = panelDomId(panel.id);
+    const chart = makeChart(`chart-panel-${domId}`, panel.label, panel.color || '#059669', panel.unit || '');
+    if (chart) monitorCharts[panel.id] = chart;
+  });
+}
 
-  charts.cpu = makeChart('chart-cpu', 'CPU%', '#059669', '%');
-  charts.mem = makeChart('chart-mem', 'MEM%', '#2563eb', '%');
-  charts.temp = makeChart('chart-temp', 'Temp', '#d97706', '°C');
-  charts.net = makeChart('chart-net', 'KB/s', '#7c3aed', '');
+function applyPanelData(panel, data) {
+  const domId = panelDomId(panel.id);
+  if (panel.display === 'chart') {
+    if (data.value != null) pushPoint(monitorCharts[panel.id], data.value);
+    const meta = document.getElementById(`meta-panel-${domId}`);
+    if (meta) meta.textContent = data.meta || '—';
+    return;
+  }
+  if (panel.display === 'text') {
+    const textEl = document.getElementById(`text-panel-${domId}`);
+    const meta = document.getElementById(`meta-panel-${domId}`);
+    const text = data.text != null ? String(data.text) : (data.meta || '—');
+    if (textEl) textEl.textContent = text;
+    if (meta) meta.textContent = data.meta || text;
+    return;
+  }
+  if (panel.display === 'disks') {
+    renderDisksInto(`disks-panel-${domId}`, data.disks);
+    return;
+  }
+  if (panel.display === 'table') {
+    renderProcsInto(`procs-panel-${domId}`, data.top);
+  }
+}
 
-  fetch('/api/monitor?history=60').then((r) => r.ok && r.json().then((snap) => {
-    if (Array.isArray(snap.history)) snap.history.forEach(applyMonitor);
-    applyMonitor(snap);
-  }));
+function applyMonitorSnap(snap) {
+  const panelData = snap.panels || {};
+  monitorPanels.forEach((panel) => {
+    applyPanelData(panel, panelData[panel.id] || {});
+  });
+}
 
+async function backfillMonitorHistory() {
+  try {
+    const resp = await fetch('/api/monitor?history=60');
+    if (!resp.ok) return;
+    const snap = await resp.json();
+    if (Array.isArray(snap.history)) snap.history.forEach(applyMonitorSnap);
+    applyMonitorSnap(snap);
+  } catch (e) { /* ignore */ }
+}
+
+async function refreshMonitorUi() {
+  Object.values(monitorCharts).forEach((chart) => chart.destroy());
+  monitorCharts = {};
+  renderMonitorGrid();
+  initMonitorCharts();
+  await backfillMonitorHistory();
+}
+
+function connectMonitorStream() {
   let backoff = 1000;
   function connect() {
     const es = new EventSource('/api/monitor/stream');
     es.onmessage = (ev) => {
-      try { applyMonitor(JSON.parse(ev.data)); backoff = 1000; }
+      try { applyMonitorSnap(JSON.parse(ev.data)); backoff = 1000; }
       catch (e) { /* ignore */ }
     };
     es.onerror = () => {
@@ -973,6 +1352,19 @@ function initMonitor() {
     };
   }
   connect();
+}
+
+async function initMonitor() {
+  if (monitorReady) return;
+  await loadMonitorPanelConfig();
+  renderMonitorGrid();
+  initMonitorCharts();
+  monitorReady = true;
+  await backfillMonitorHistory();
+  if (!monitorStreamStarted) {
+    monitorStreamStarted = true;
+    connectMonitorStream();
+  }
 }
 
 // The monitor tab is the default landing view — initialise immediately so

@@ -225,6 +225,19 @@ button.btn-sm { padding: 6px 12px; font-size: 13px; font-weight: 500; }
   font-weight: 600;
 }
 .section-hint { font-size: 12px; margin: 0 0 8px; }
+.monitor-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}
+.panel-text {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 22px;
+  font-weight: 600;
+  margin: 8px 0;
+  word-break: break-word;
+}
+#panel-edit-form select { margin-bottom: 12px; }
 .manage-section-title {
   font-size: 14px;
   margin: 12px 0 8px;
@@ -462,38 +475,45 @@ code {
   margin-top: 8px;
 }
 
-#disks .disk {
+#disks .disk,
+.disk-list .disk {
   display: grid;
   grid-template-columns: 1fr auto;
   align-items: center;
   gap: 4px 12px;
   margin-bottom: 10px;
 }
-#disks .disk .label {
+#disks .disk .label,
+.disk-list .disk .label {
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   font-size: 13px;
 }
-#disks .disk .num {
+#disks .disk .num,
+.disk-list .disk .num {
   color: var(--muted);
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   font-size: 12px;
   text-align: right;
 }
-#disks .bar {
+#disks .bar,
+.disk-list .bar {
   grid-column: 1 / -1;
   height: 8px;
   background: var(--panel-2);
   border-radius: 999px;
   overflow: hidden;
 }
-#disks .bar > span {
+#disks .bar > span,
+.disk-list .bar > span {
   display: block;
   height: 100%;
   background: linear-gradient(90deg, var(--accent), var(--accent-dim));
   transition: width 0.5s ease;
 }
-#disks .bar > span.warn { background: linear-gradient(90deg, var(--warn), #f59e0b); }
-#disks .bar > span.danger { background: linear-gradient(90deg, var(--danger), #b91c1c); }
+#disks .bar > span.warn,
+.disk-list .bar > span.warn { background: linear-gradient(90deg, var(--warn), #f59e0b); }
+#disks .bar > span.danger,
+.disk-list .bar > span.danger { background: linear-gradient(90deg, var(--danger), #b91c1c); }
 
 .proc-table {
   width: 100%;

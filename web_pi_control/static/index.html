@@ -35,44 +35,10 @@
   </nav>
 
   <section id="tab-monitor" class="tab visible">
-    <div class="monitor-grid">
-      <div class="card">
-        <h2>CPU 占用</h2>
-        <div class="chart-wrap"><canvas id="chart-cpu"></canvas></div>
-        <div class="meta" id="cpu-meta">load: ?  cores: ?</div>
-      </div>
-
-      <div class="card">
-        <h2>内存</h2>
-        <div class="chart-wrap"><canvas id="chart-mem"></canvas></div>
-        <div class="meta" id="mem-meta">used: ?  swap: ?</div>
-      </div>
-
-      <div class="card">
-        <h2>温度 (°C)</h2>
-        <div class="chart-wrap"><canvas id="chart-temp"></canvas></div>
-        <div class="meta" id="temp-meta">cur: ?</div>
-      </div>
-
-      <div class="card">
-        <h2>网络吞吐 (KB/s)</h2>
-        <div class="chart-wrap"><canvas id="chart-net"></canvas></div>
-        <div class="meta" id="net-meta">↓0  ↑0</div>
-      </div>
-
-      <div class="card wide">
-        <h2>磁盘</h2>
-        <div id="disks"></div>
-      </div>
-
-      <div class="card wide">
-        <h2>Top 进程（按 CPU%）</h2>
-        <table class="proc-table">
-          <thead><tr><th>PID</th><th>用户</th><th>命令</th><th>CPU%</th><th>MEM%</th></tr></thead>
-          <tbody id="procs"></tbody>
-        </table>
-      </div>
+    <div class="monitor-toolbar">
+      <button type="button" id="btn-manage-panels" class="ghost btn-sm" hidden>管理面板</button>
     </div>
+    <div class="monitor-grid" id="monitor-grid"></div>
   </section>
 
   <section id="tab-commands" class="tab">
@@ -194,6 +160,67 @@
         <button type="submit" class="primary">执行</button>
       </div>
       <p id="btn-run-err" class="err"></p>
+    </form>
+  </div>
+</div>
+
+<!-- Monitor panel manager -->
+<div id="panel-manage-modal" class="modal" hidden>
+  <div class="modal-card modal-wide">
+    <h2>管理监控面板</h2>
+    <p class="muted">拖动左侧 <span class="drag-hint">≡</span> 调整顺序。每个面板 = 后台 Shell 命令 + 结果提炼方式。</p>
+    <div id="panel-manage-list" class="btn-manage-list"></div>
+    <div class="modal-actions">
+      <button type="button" id="panel-manage-add" class="ghost">添加面板</button>
+      <button type="button" id="panel-manage-close" class="primary">完成</button>
+    </div>
+    <p id="panel-manage-err" class="err"></p>
+  </div>
+</div>
+
+<!-- Add / edit monitor panel -->
+<div id="panel-edit-modal" class="modal" hidden>
+  <div class="modal-card modal-wide">
+    <h2 id="panel-edit-title">添加面板</h2>
+    <form id="panel-edit-form">
+      <label class="field-label" for="panel-edit-label">面板标题</label>
+      <input type="text" id="panel-edit-label" placeholder="例如：GPU 温度" maxlength="40" required />
+      <label class="field-label" for="panel-edit-command">Shell 命令</label>
+      <input type="text" id="panel-edit-command" placeholder="例如：vcgencmd measure_temp" maxlength="500" required />
+      <p class="muted field-hint">命令在服务端后台定期执行。示例：<code>vcgencmd measure_temp</code>、<code>cat /proc/net/dev</code>、<code>df -P -B1</code></p>
+      <label class="field-label" for="panel-edit-display">展示方式</label>
+      <select id="panel-edit-display">
+        <option value="chart">折线图</option>
+        <option value="text">文本</option>
+        <option value="disks">磁盘条</option>
+        <option value="table">进程表</option>
+      </select>
+      <label class="field-label" for="panel-edit-parse">结果提炼</label>
+      <select id="panel-edit-parse">
+        <option value="float">提取首个数字</option>
+        <option value="regex">正则捕获</option>
+        <option value="netrate">网络速率（/proc/net/dev）</option>
+        <option value="df">df 输出（磁盘条）</option>
+        <option value="ps">ps 输出（进程表）</option>
+        <option value="text">全文文本</option>
+      </select>
+      <label class="field-label" for="panel-edit-parse-arg">正则表达式（捕获组 1 为数值）</label>
+      <input type="text" id="panel-edit-parse-arg" placeholder="例如：temp=([\\d.]+)" maxlength="200" />
+      <div class="panel-chart-only">
+        <label class="field-label" for="panel-edit-unit">单位（折线图 Y 轴）</label>
+        <input type="text" id="panel-edit-unit" placeholder="例如：% 或 °C" maxlength="12" />
+        <label class="field-label" for="panel-edit-color">折线颜色</label>
+        <input type="text" id="panel-edit-color" placeholder="#059669" maxlength="7" />
+      </div>
+      <label class="checkbox-row">
+        <input type="checkbox" id="panel-edit-wide" />
+        宽面板（占满一行）
+      </label>
+      <div class="modal-actions">
+        <button type="button" id="panel-edit-cancel" class="ghost">取消</button>
+        <button type="submit" class="primary">保存</button>
+      </div>
+      <p id="panel-edit-err" class="err"></p>
     </form>
   </div>
 </div>
