@@ -168,7 +168,7 @@
 <div id="panel-manage-modal" class="modal" hidden>
   <div class="modal-card modal-wide">
     <h2>管理监控面板</h2>
-    <p class="muted">拖动左侧 <span class="drag-hint">≡</span> 调整顺序。每个面板由「提炼方式 + 命令」组成，服务端后台定期执行并展示结果。</p>
+    <p class="muted">拖动左侧 <span class="drag-hint">≡</span> 调整顺序。每个面板 = 后台 Shell 命令 + 结果提炼方式。</p>
     <div id="panel-manage-list" class="btn-manage-list"></div>
     <div class="modal-actions">
       <button type="button" id="panel-manage-add" class="ghost">添加面板</button>
@@ -185,31 +185,27 @@
     <form id="panel-edit-form">
       <label class="field-label" for="panel-edit-label">面板标题</label>
       <input type="text" id="panel-edit-label" placeholder="例如：GPU 温度" maxlength="40" required />
-      <fieldset class="type-toggle">
-        <legend class="field-label">提炼方式</legend>
-        <label class="radio-row"><input type="radio" name="panel-extract" value="builtin" checked /> 内置（cpu / memory / temp / network / disks / procs）</label>
-        <label class="radio-row"><input type="radio" name="panel-extract" value="shell" /> Shell 命令（后台执行）</label>
-      </fieldset>
-      <label class="field-label" for="panel-edit-command">命令</label>
-      <input type="text" id="panel-edit-command" placeholder="builtin: cpu  或  shell: vcgencmd measure_temp" maxlength="500" required />
-      <p class="muted field-hint panel-shell-only">Shell 示例：<code>vcgencmd measure_temp</code>、<code>cat /sys/class/thermal/thermal_zone0/temp</code></p>
-      <div class="panel-shell-only">
-        <label class="field-label" for="panel-edit-parse">结果提炼</label>
-        <select id="panel-edit-parse">
-          <option value="float">提取首个数字</option>
-          <option value="regex">正则捕获</option>
-          <option value="text">全文文本</option>
-        </select>
-        <label class="field-label" for="panel-edit-parse-arg">正则表达式（捕获组 1 为数值）</label>
-        <input type="text" id="panel-edit-parse-arg" placeholder="例如：temp=([\\d.]+)" maxlength="200" />
-      </div>
+      <label class="field-label" for="panel-edit-command">Shell 命令</label>
+      <input type="text" id="panel-edit-command" placeholder="例如：vcgencmd measure_temp" maxlength="500" required />
+      <p class="muted field-hint">命令在服务端后台定期执行。示例：<code>vcgencmd measure_temp</code>、<code>cat /proc/net/dev</code>、<code>df -P -B1</code></p>
       <label class="field-label" for="panel-edit-display">展示方式</label>
       <select id="panel-edit-display">
         <option value="chart">折线图</option>
         <option value="text">文本</option>
-        <option value="disks">磁盘条（仅 builtin disks）</option>
-        <option value="table">进程表（仅 builtin procs）</option>
+        <option value="disks">磁盘条</option>
+        <option value="table">进程表</option>
       </select>
+      <label class="field-label" for="panel-edit-parse">结果提炼</label>
+      <select id="panel-edit-parse">
+        <option value="float">提取首个数字</option>
+        <option value="regex">正则捕获</option>
+        <option value="netrate">网络速率（/proc/net/dev）</option>
+        <option value="df">df 输出（磁盘条）</option>
+        <option value="ps">ps 输出（进程表）</option>
+        <option value="text">全文文本</option>
+      </select>
+      <label class="field-label" for="panel-edit-parse-arg">正则表达式（捕获组 1 为数值）</label>
+      <input type="text" id="panel-edit-parse-arg" placeholder="例如：temp=([\\d.]+)" maxlength="200" />
       <div class="panel-chart-only">
         <label class="field-label" for="panel-edit-unit">单位（折线图 Y 轴）</label>
         <input type="text" id="panel-edit-unit" placeholder="例如：% 或 °C" maxlength="12" />

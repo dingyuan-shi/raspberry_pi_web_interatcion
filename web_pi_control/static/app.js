@@ -851,7 +851,6 @@ const panelEditUnit = document.getElementById('panel-edit-unit');
 const panelEditColor = document.getElementById('panel-edit-color');
 const panelEditWide = document.getElementById('panel-edit-wide');
 const panelEditErr = document.getElementById('panel-edit-err');
-const panelExtractRadios = panelEditForm.querySelectorAll('input[name="panel-extract"]');
 let monitorPanels = [];
 let editingPanelId = null;
 let panelPointerDrag = null;
@@ -860,41 +859,28 @@ function panelDomId(panelId) {
   return String(panelId).replace(/[^a-zA-Z0-9_-]/g, '_');
 }
 
-function getPanelExtract() {
-  const checked = panelEditForm.querySelector('input[name="panel-extract"]:checked');
-  return checked ? checked.value : 'builtin';
-}
-
-function setPanelExtract(value) {
-  panelExtractRadios.forEach((r) => { r.checked = r.value === value; });
-  syncPanelEditUi();
-}
-
 function syncPanelEditUi() {
-  const extract = getPanelExtract();
   const display = panelEditDisplay.value;
-  panelEditForm.querySelectorAll('.panel-shell-only').forEach((el) => {
-    el.hidden = extract !== 'shell';
-  });
   panelEditForm.querySelectorAll('.panel-chart-only').forEach((el) => {
     el.hidden = display !== 'chart';
   });
-  panelEditParseArg.disabled = panelEditParse.value !== 'regex';
-  if (extract === 'builtin') {
-    panelEditCommand.placeholder = 'builtin 键：cpu / memory / temp / network / disks / procs';
-  } else {
-    panelEditCommand.placeholder = '例如：vcgencmd measure_temp';
+  if (display === 'disks') panelEditParse.value = 'df';
+  if (display === 'table') panelEditParse.value = 'ps';
+  if (display === 'chart' && panelEditParse.value === 'df') panelEditParse.value = 'float';
+  if (display === 'chart' && panelEditParse.value === 'ps') panelEditParse.value = 'float';
+  if (display === 'text' && !['text', 'regex'].includes(panelEditParse.value)) {
+    panelEditParse.value = 'text';
   }
+  panelEditParseArg.disabled = panelEditParse.value !== 'regex';
+  panelEditCommand.placeholder = '例如：vcgencmd measure_temp 或 cat /proc/net/dev';
 }
 
-panelExtractRadios.forEach((r) => r.addEventListener('change', syncPanelEditUi));
 panelEditParse.addEventListener('change', syncPanelEditUi);
 panelEditDisplay.addEventListener('change', syncPanelEditUi);
 
 function panelSummary(panel) {
-  const extract = panel.extract === 'builtin' ? '内置' : 'Shell';
-  const cmd = panel.command.length > 48 ? `${panel.command.slice(0, 48)}…` : panel.command;
-  return `${extract} · ${panel.display} · ${cmd}`;
+  const cmd = panel.command.length > 40 ? `${panel.command.slice(0, 40)}…` : panel.command;
+  return `${panel.parse} · ${panel.display} · ${cmd}`;
 }
 
 function clearPanelDragOver() {
@@ -1047,7 +1033,6 @@ function openPanelEditor(id, template = null) {
   if (template) {
     panelEditTitle.textContent = '复制面板';
     panelEditLabel.value = source.label.length > 36 ? `${source.label.slice(0, 36)} 副本` : `${source.label} 副本`;
-    setPanelExtract(source.extract);
     panelEditCommand.value = source.command;
     panelEditParse.value = source.parse || 'float';
     panelEditParseArg.value = source.parse_arg || '';
@@ -1058,7 +1043,6 @@ function openPanelEditor(id, template = null) {
   } else if (editingPanelId && source) {
     panelEditTitle.textContent = '编辑面板';
     panelEditLabel.value = source.label;
-    setPanelExtract(source.extract);
     panelEditCommand.value = source.command;
     panelEditParse.value = source.parse || 'float';
     panelEditParseArg.value = source.parse_arg || '';
@@ -1069,7 +1053,6 @@ function openPanelEditor(id, template = null) {
   } else {
     panelEditTitle.textContent = '添加面板';
     panelEditLabel.value = '';
-    setPanelExtract('shell');
     panelEditCommand.value = '';
     panelEditParse.value = 'float';
     panelEditParseArg.value = '';
@@ -1124,7 +1107,6 @@ panelEditForm.addEventListener('submit', async (ev) => {
   const panel = {
     id: editingPanelId || newButtonId(),
     label: panelEditLabel.value.trim(),
-    extract: getPanelExtract(),
     command: panelEditCommand.value.trim(),
     parse: panelEditParse.value,
     parse_arg: panelEditParseArg.value.trim(),
@@ -1134,10 +1116,10 @@ panelEditForm.addEventListener('submit', async (ev) => {
     wide: panelEditWide.checked,
   };
   if (!panel.label || !panel.command) {
-    panelEditErr.textContent = '请填写面板标题和命令';
+    panelEditErr.textContent = '请填写面板标题和 Shell 命令';
     return;
   }
-  if (panel.extract === 'shell' && panel.parse === 'regex' && !panel.parse_arg) {
+  if (panel.parse === 'regex' && !panel.parse_arg) {
     panelEditErr.textContent = '正则提炼需要填写表达式';
     return;
   }
@@ -1225,6 +1207,7 @@ function humanBytes(n) {
 function renderDisksInto(rootId, disks) {
   const root = document.getElementById(rootId);
   if (!root) return;
+  root.className = 'disk-list';
   if (!disks || !disks.length) { root.innerHTML = '<p class="muted">无可读分区</p>'; return; }
   root.innerHTML = disks.map((d) => {
     const cls = d.percent > 90 ? 'danger' : d.percent > 75 ? 'warn' : '';
@@ -1264,7 +1247,7 @@ function renderMonitorGrid() {
       return `
         <div class="card${wide}" data-panel-id="${escapeHtml(panel.id)}">
           <h2>${escapeHtml(panel.label)}</h2>
-          <div id="disks-panel-${domId}"></div>
+          <div class="disk-list" id="disks-panel-${domId}"></div>
         </div>`;
     }
     if (panel.display === 'table') {

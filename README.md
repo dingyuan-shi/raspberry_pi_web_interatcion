@@ -10,9 +10,9 @@
 
 - **默认面板**：CPU、内存、温度、网络、磁盘、Top 进程
 - **可自定义**：登录后点击「管理面板」，可添加 / 编辑 / 删除 / 复制 / 拖动排序
-- **统一模型**：每个面板 = **提炼方式** + **后台命令** + **展示方式**
-  - **内置**：`cpu`、`memory`、`temp`、`network`、`disks`、`procs`（由服务端采集）
-  - **Shell**：任意 shell 命令，服务端定期后台执行，再用「提取首个数字 / 正则 / 全文」提炼结果
+- **统一模型**：每个面板 = **Shell 命令** + **结果提炼** + **展示方式**
+  - 命令在服务端后台定期执行（如 `vcgencmd measure_temp`、`cat /proc/net/dev`、`df -P -B1`）
+  - **提炼**：`float`（首个数字）、`regex`、`netrate`（网络速率）、`df`（磁盘条）、`ps`（进程表）、`text`
   - **展示**：折线图、纯文本、磁盘条、进程表
 
 配置保存在 `{DATA_DIR}/monitor_panels.json`（默认 `/opt/pi-remote/data/`，安装时不会被覆盖）。
@@ -119,27 +119,26 @@ WS   /api/shell         交互终端（需登录）
 
 | 字段 | 说明 |
 |------|------|
-| 提炼方式 | `builtin`（内置指标）或 `shell`（后台 shell） |
-| 命令 | 内置键名，或 shell 命令（如 `vcgencmd measure_temp`） |
-| 结果提炼 | Shell 专用：`float`（首个数字）、`regex`（正则捕获组 1）、`text`（全文） |
+| Shell 命令 | 后台执行的命令，可用管道（如 `df -P -B1`、`ps -eo ...`） |
+| 结果提炼 | `float`、`regex`、`netrate`、`df`、`ps`、`text` |
 | 展示方式 | `chart` 折线图、`text` 文本、`disks` 磁盘条、`table` 进程表 |
 
-**Shell 面板示例**（GPU 温度）：
+**默认面板（均为 Shell 命令）**：
 
-| 标题 | 提炼方式 | 命令 | 结果提炼 | 正则 | 展示 |
-|------|----------|------|----------|------|------|
-| GPU 温度 | shell | `vcgencmd measure_temp` | regex | `temp=([\d.]+)` | chart（单位 °C） |
+| 面板 | 命令 | 提炼 |
+|------|------|------|
+| CPU | `python3 -c "import psutil; print(psutil.cpu_percent(interval=0.2))"` | float |
+| 内存 | `python3 -c "import psutil; print(psutil.virtual_memory().percent)"` | float |
+| 温度 | `awk` / `vcgencmd` 读取 thermal | float |
+| 网络 | `cat /proc/net/dev` | netrate（两次采样算速率） |
+| 磁盘 | `df -P -B1` | df |
+| 进程 | `ps -eo pid,user,comm,pcpu,pmem ...` | ps |
 
-**内置面板示例**：
+**自定义示例**（GPU 温度）：
 
-| 命令键 | 展示 | 说明 |
-|--------|------|------|
-| `cpu` | chart | CPU 占用 %，附 load / 各核占用 |
-| `memory` | chart | 内存占用 %，附 swap |
-| `temp` | chart | CPU 温度（sysfs / vcgencmd） |
-| `network` | chart | 网络吞吐 KB/s |
-| `disks` | disks | 各分区使用率条 |
-| `procs` | table | Top 进程表 |
+| 标题 | 命令 | 提炼 | 正则 | 展示 |
+|------|------|------|------|------|
+| GPU 温度 | `vcgencmd measure_temp` | regex | `temp=([\d.]+)` | chart（单位 °C） |
 
 拖动左侧 `≡` 可调整面板顺序；「复制」可快速基于现有面板新建。
 
@@ -215,7 +214,7 @@ raspberry_pi_web_interaction/
 ├── pi_remote_core/          # 命令协议、系统信息采集、配置
 │   ├── command_buttons.py   # 命令按钮持久化
 │   ├── monitor_panels.py    # 监控面板持久化
-│   └── panel_extractors.py  # 面板数据提炼（builtin + shell）
+│   └── panel_extractors.py  # 面板 Shell 执行与结果提炼
 ├── web_pi_control/          # FastAPI + 前端静态文件
 │   ├── kindle_html.py       # lite / cheap 共用仪表盘模板
 │   └── static/              # 主页 index.html / app.js / style.css

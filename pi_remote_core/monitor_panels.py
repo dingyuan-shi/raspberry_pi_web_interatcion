@@ -11,14 +11,13 @@ from typing import Any
 
 from . import config
 
-EXTRACT_BUILTIN = "builtin"
-EXTRACT_SHELL = "shell"
-EXTRACT_METHODS = {EXTRACT_BUILTIN, EXTRACT_SHELL}
-
 PARSE_FLOAT = "float"
 PARSE_REGEX = "regex"
 PARSE_TEXT = "text"
-PARSE_METHODS = {PARSE_FLOAT, PARSE_REGEX, PARSE_TEXT}
+PARSE_NETRATE = "netrate"
+PARSE_DF = "df"
+PARSE_PS = "ps"
+PARSE_METHODS = {PARSE_FLOAT, PARSE_REGEX, PARSE_TEXT, PARSE_NETRATE, PARSE_DF, PARSE_PS}
 
 DISPLAY_CHART = "chart"
 DISPLAY_TEXT = "text"
@@ -26,14 +25,25 @@ DISPLAY_DISKS = "disks"
 DISPLAY_TABLE = "table"
 DISPLAY_TYPES = {DISPLAY_CHART, DISPLAY_TEXT, DISPLAY_DISKS, DISPLAY_TABLE}
 
-BUILTIN_KEYS = {"cpu", "memory", "temp", "network", "disks", "procs"}
+# Default panels: shell command + parse method (no separate “builtin” type).
+_DEFAULT_CPU_CMD = 'python3 -c "import psutil; print(psutil.cpu_percent(interval=0.2))"'
+_DEFAULT_MEM_CMD = 'python3 -c "import psutil; print(psutil.virtual_memory().percent)"'
+_DEFAULT_TEMP_CMD = (
+    "sh -c 'test -r /sys/class/thermal/thermal_zone0/temp && "
+    'awk "{printf \\"%.1f\\", \\$1/1000}" /sys/class/thermal/thermal_zone0/temp '
+    '|| vcgencmd measure_temp | sed "s/temp=//;s/.C//"\''
+)
+_DEFAULT_NET_CMD = "cat /proc/net/dev"
+_DEFAULT_DF_CMD = "df -P -B1 2>/dev/null"
+_DEFAULT_PS_CMD = (
+    "ps -eo pid,user,comm,pcpu,pmem --sort=-pcpu --no-headers 2>/dev/null | head -8"
+)
 
 DEFAULT_PANELS: list[dict[str, Any]] = [
     {
         "id": "default-cpu",
         "label": "CPU 占用",
-        "extract": EXTRACT_BUILTIN,
-        "command": "cpu",
+        "command": _DEFAULT_CPU_CMD,
         "parse": PARSE_FLOAT,
         "parse_arg": "",
         "display": DISPLAY_CHART,
@@ -44,8 +54,7 @@ DEFAULT_PANELS: list[dict[str, Any]] = [
     {
         "id": "default-memory",
         "label": "内存",
-        "extract": EXTRACT_BUILTIN,
-        "command": "memory",
+        "command": _DEFAULT_MEM_CMD,
         "parse": PARSE_FLOAT,
         "parse_arg": "",
         "display": DISPLAY_CHART,
@@ -56,8 +65,7 @@ DEFAULT_PANELS: list[dict[str, Any]] = [
     {
         "id": "default-temp",
         "label": "温度 (°C)",
-        "extract": EXTRACT_BUILTIN,
-        "command": "temp",
+        "command": _DEFAULT_TEMP_CMD,
         "parse": PARSE_FLOAT,
         "parse_arg": "",
         "display": DISPLAY_CHART,
@@ -68,9 +76,8 @@ DEFAULT_PANELS: list[dict[str, Any]] = [
     {
         "id": "default-network",
         "label": "网络吞吐 (KB/s)",
-        "extract": EXTRACT_BUILTIN,
-        "command": "network",
-        "parse": PARSE_FLOAT,
+        "command": _DEFAULT_NET_CMD,
+        "parse": PARSE_NETRATE,
         "parse_arg": "",
         "display": DISPLAY_CHART,
         "unit": "",
@@ -80,9 +87,8 @@ DEFAULT_PANELS: list[dict[str, Any]] = [
     {
         "id": "default-disks",
         "label": "磁盘",
-        "extract": EXTRACT_BUILTIN,
-        "command": "disks",
-        "parse": PARSE_TEXT,
+        "command": _DEFAULT_DF_CMD,
+        "parse": PARSE_DF,
         "parse_arg": "",
         "display": DISPLAY_DISKS,
         "unit": "",
@@ -92,9 +98,8 @@ DEFAULT_PANELS: list[dict[str, Any]] = [
     {
         "id": "default-procs",
         "label": "Top 进程（按 CPU%）",
-        "extract": EXTRACT_BUILTIN,
-        "command": "procs",
-        "parse": PARSE_TEXT,
+        "command": _DEFAULT_PS_CMD,
+        "parse": PARSE_PS,
         "parse_arg": "",
         "display": DISPLAY_TABLE,
         "unit": "",
@@ -102,6 +107,16 @@ DEFAULT_PANELS: list[dict[str, Any]] = [
         "wide": True,
     },
 ]
+
+# Migrate legacy builtin command keys from earlier releases.
+_LEGACY_BUILTIN: dict[str, tuple[str, str]] = {
+    "cpu": (_DEFAULT_CPU_CMD, PARSE_FLOAT),
+    "memory": (_DEFAULT_MEM_CMD, PARSE_FLOAT),
+    "temp": (_DEFAULT_TEMP_CMD, PARSE_FLOAT),
+    "network": (_DEFAULT_NET_CMD, PARSE_NETRATE),
+    "disks": (_DEFAULT_DF_CMD, PARSE_DF),
+    "procs": (_DEFAULT_PS_CMD, PARSE_PS),
+}
 
 MAX_PANELS = 32
 MAX_LABEL_LEN = 40
@@ -137,7 +152,21 @@ def _write_store(panels: list[dict[str, Any]]) -> None:
     os.replace(tmp, path)
 
 
+def _migrate_legacy(raw: dict[str, Any]) -> dict[str, Any]:
+    """Drop extract=builtin and map old command keys to shell commands."""
+    data = dict(raw)
+    data.pop("extract", None)
+    cmd = str(data.get("command", "")).strip()
+    if cmd in _LEGACY_BUILTIN:
+        shell_cmd, parse = _LEGACY_BUILTIN[cmd]
+        data["command"] = shell_cmd
+        if str(data.get("parse", "")).strip() in {"", "text"} or cmd in {"network", "disks", "procs"}:
+            data["parse"] = parse
+    return data
+
+
 def _normalize_panel(raw: dict[str, Any]) -> dict[str, Any]:
+    raw = _migrate_legacy(raw)
     label = str(raw.get("label", "")).strip()
     command = str(raw.get("command", "")).strip()
     if not label or not command:
@@ -146,10 +175,6 @@ def _normalize_panel(raw: dict[str, Any]) -> dict[str, Any]:
         raise ValueError(f"label must be at most {MAX_LABEL_LEN} characters")
     if len(command) > MAX_COMMAND_LEN:
         raise ValueError(f"command must be at most {MAX_COMMAND_LEN} characters")
-
-    extract = str(raw.get("extract", EXTRACT_SHELL)).strip()
-    if extract not in EXTRACT_METHODS:
-        raise ValueError(f"extract must be one of: {', '.join(sorted(EXTRACT_METHODS))}")
 
     parse = str(raw.get("parse", PARSE_FLOAT)).strip()
     if parse not in PARSE_METHODS:
@@ -174,25 +199,20 @@ def _normalize_panel(raw: dict[str, Any]) -> dict[str, Any]:
     panel_id = str(raw.get("id") or "").strip() or str(uuid.uuid4())
     wide = bool(raw.get("wide", False))
 
-    if extract == EXTRACT_BUILTIN:
-        if command not in BUILTIN_KEYS:
-            raise ValueError(f"builtin command must be one of: {', '.join(sorted(BUILTIN_KEYS))}")
-        if command == "disks" and display != DISPLAY_DISKS:
-            raise ValueError("builtin disks requires display=disks")
-        if command == "procs" and display != DISPLAY_TABLE:
-            raise ValueError("builtin procs requires display=table")
-        if command in {"disks", "procs"} and display in {DISPLAY_CHART, DISPLAY_TEXT}:
-            raise ValueError("disks/procs builtins cannot use chart/text display")
-    else:
-        if display in {DISPLAY_DISKS, DISPLAY_TABLE}:
-            raise ValueError("shell panels only support chart or text display")
-        if parse == PARSE_REGEX and not parse_arg:
-            raise ValueError("parse_arg is required when parse=regex")
+    if parse == PARSE_REGEX and not parse_arg:
+        raise ValueError("parse_arg is required when parse=regex")
+    if display == DISPLAY_DISKS and parse != PARSE_DF:
+        raise ValueError("disks display requires parse=df")
+    if display == DISPLAY_TABLE and parse != PARSE_PS:
+        raise ValueError("table display requires parse=ps")
+    if display in {DISPLAY_CHART, DISPLAY_TEXT} and parse in {PARSE_DF, PARSE_PS}:
+        raise ValueError("df/ps parse is only for disks/table display")
+    if display == DISPLAY_CHART and parse == PARSE_TEXT:
+        raise ValueError("chart display cannot use parse=text")
 
     return {
         "id": panel_id,
         "label": label,
-        "extract": extract,
         "command": command,
         "parse": parse,
         "parse_arg": parse_arg,
