@@ -87,107 +87,95 @@ def sparkline_svg(
 </svg>"""
 
 
-def _history_series(history: list[dict], key: str, nested: Optional[str] = None) -> list[Optional[float]]:
+def _panel_history_series(hist: list[dict[str, Any]], panel_id: str) -> list[Optional[float]]:
     out: list[Optional[float]] = []
-    for row in history:
-        if nested:
-            block = row.get(nested) or {}
-            out.append(block.get(key) if isinstance(block, dict) else None)
+    for row in hist:
+        pdata = (row.get("panels") or {}).get(panel_id) or {}
+        value = pdata.get("value")
+        if isinstance(value, (int, float)):
+            out.append(float(value))
         else:
-            out.append(row.get(key))
+            out.append(None)
     return out
 
 
-def _net_series(history: list[dict]) -> list[Optional[float]]:
-    out: list[Optional[float]] = []
-    for row in history:
-        nets = row.get("net") or []
-        total = 0.0
-        found = False
-        for nic in nets:
-            if not isinstance(nic, dict):
-                continue
-            rx = nic.get("rx_bps")
-            tx = nic.get("tx_bps")
-            if rx is not None or tx is not None:
-                total += (rx or 0) + (tx or 0)
-                found = True
-        out.append(total / 1024.0 if found else None)
-    return out
+def _stroke_fill(color: str) -> tuple[str, str]:
+    stroke = color if color else "#111111"
+    if stroke.startswith("#") and len(stroke) == 7:
+        fill = stroke + "33"
+    else:
+        fill = "#dddddd"
+    return stroke, fill
 
 
-def _dashboard_body(
+def _render_panel_card(
+    panel: dict[str, Any],
+    pdata: dict[str, Any],
+    hist: list[dict[str, Any]],
+) -> str:
+    label = _esc(panel.get("label", "?"))
+    wide = " wide" if panel.get("wide") else ""
+    display = panel.get("display", "chart")
+    panel_id = panel["id"]
+
+    if display == "chart":
+        series = _panel_history_series(hist, panel_id)
+        stroke, fill = _stroke_fill(str(panel.get("color") or ""))
+        chart = sparkline_svg(
+            series,
+            stroke=stroke,
+            fill=fill,
+            unit=str(panel.get("unit") or ""),
+        )
+        meta = _esc(pdata.get("meta") or "—")
+        return (
+            f'<div class="card{wide}"><h2>{label}</h2>{chart}'
+            f'<div class="meta">{meta}</div></div>'
+        )
+
+    if display == "text":
+        text = pdata.get("text") or pdata.get("meta") or "—"
+        return (
+            f'<div class="card{wide}"><h2>{label}</h2>'
+            f'<div class="textval">{_esc(text)}</div></div>'
+        )
+
+    if display == "disks":
+        disks_html = _render_disks(pdata.get("disks") or [])
+        return f'<div class="card{wide}"><h2>{label}</h2>{disks_html}</div>'
+
+    if display == "table":
+        procs_html = _render_procs(pdata.get("top") or [])
+        return (
+            f'<div class="card{wide}"><h2>{label}</h2>'
+            f"<table>"
+            f"<thead><tr><th>PID</th><th>用户</th><th>命令</th><th>CPU%</th><th>MEM%</th></tr></thead>"
+            f"<tbody>{procs_html}</tbody></table></div>"
+        )
+
+    return f'<div class="card{wide}"><h2>{label}</h2><p class="meta">未知展示类型</p></div>'
+
+
+def _render_panel_grid(
+    panels: list[dict[str, Any]],
     snap: dict[str, Any],
     hist: list[dict[str, Any]],
-) -> tuple[str, ...]:
-    cpu_hist = _history_series(hist, "cpu_pct")
-    mem_hist = _history_series(hist, "percent", nested="memory")
-    temp_hist = _history_series(hist, "temp_c")
-    net_hist = _net_series(hist)
-
-    host = _esc(snap.get("host", "?"))
-    ip = _esc(snap.get("ip", "?"))
-    cpu = snap.get("cpu_pct")
-    mem = snap.get("mem_pct")
-    temp = snap.get("temp_c")
-    uptime = _esc(snap.get("uptime", "?"))
-
-    cpu_pill = f"cpu={cpu:.1f}%" if isinstance(cpu, (int, float)) else "cpu=?"
-    mem_pill = f"mem={mem:.1f}%" if isinstance(mem, (int, float)) else "mem=?"
-    temp_pill = f"temp={temp:.1f}C" if isinstance(temp, (int, float)) else "temp=?"
-
-    load = snap.get("load")
-    load_txt = " / ".join(f"{x:.2f}" for x in load) if load else "?"
-    cores = snap.get("cpu_per_core") or []
-    cores_txt = " ".join(f"{c:.0f}%" for c in cores) if cores else "?"
-
-    memory = snap.get("memory") or {}
-    mem_meta = (
-        f"used {human_bytes(memory.get('used'))} / {human_bytes(memory.get('total'))}"
-        f" ({memory.get('percent', 0):.1f}%)"
-        f" · swap {human_bytes(memory.get('swap_used'))}"
-        f" / {human_bytes(memory.get('swap_total'))}"
-        f" ({memory.get('swap_percent', 0):.1f}%)"
-    )
-
-    temp_meta = f"cur: {temp:.1f} °C" if isinstance(temp, (int, float)) else "cur: ?"
-
-    nic = next((n for n in (snap.get("net") or []) if n.get("rx_bps") is not None), None)
-    if nic:
-        rx = (nic.get("rx_bps") or 0) / 1024
-        tx = (nic.get("tx_bps") or 0) / 1024
-        net_meta = f"{_esc(nic.get('nic', '?'))}  ↓{rx:.1f} KB/s  ↑{tx:.1f} KB/s"
-    else:
-        net_meta = "↓0  ↑0"
-
-    disks_html = _render_disks(snap.get("disks") or [])
-    procs_html = _render_procs(snap.get("top") or [])
-
-    return (
-        host,
-        ip,
-        _esc(cpu_pill),
-        _esc(mem_pill),
-        _esc(temp_pill),
-        uptime,
-        _esc(load_txt),
-        _esc(cores_txt),
-        _esc(mem_meta),
-        _esc(temp_meta),
-        net_meta,
-        sparkline_svg(cpu_hist, stroke="#111", fill="#ddd", unit="%"),
-        sparkline_svg(mem_hist, stroke="#111", fill="#ddd", unit="%"),
-        sparkline_svg(temp_hist, stroke="#111", fill="#ddd", unit=""),
-        sparkline_svg(net_hist, stroke="#111", fill="#ddd", unit=""),
-        disks_html,
-        procs_html,
-    )
+) -> str:
+    panel_data = snap.get("panels") or {}
+    if not panels:
+        return '<p class="meta">暂无监控面板</p>'
+    cards = []
+    for panel in panels:
+        pdata = panel_data.get(panel["id"]) or {}
+        cards.append(_render_panel_card(panel, pdata, hist))
+    return "\n".join(cards)
 
 
 def render_dashboard_html(
     snap: dict[str, Any],
     history: list[dict[str, Any]],
     *,
+    panels: Optional[list[dict[str, Any]]] = None,
     width: int = DESIGN_WIDTH,
     height: int = DESIGN_HEIGHT,
     fit_viewport: bool = False,
@@ -203,59 +191,19 @@ def render_dashboard_html(
     if not hist or hist[-1] is not snap:
         hist.append(snap)
 
-    parts = _dashboard_body(snap, hist)
-    (
-        host,
-        ip,
-        cpu_pill,
-        mem_pill,
-        temp_pill,
-        uptime,
-        load_txt,
-        cores_txt,
-        mem_meta,
-        temp_meta,
-        net_meta,
-        cpu_chart,
-        mem_chart,
-        temp_chart,
-        net_chart,
-        disks_html,
-        procs_html,
-    ) = parts
+    panel_list = list(panels or [])
+    host = _esc(snap.get("host", "?"))
+    ip = _esc(snap.get("ip", "?"))
+    cpu = snap.get("cpu_pct")
+    mem = snap.get("mem_pct")
+    temp = snap.get("temp_c")
+    uptime = _esc(snap.get("uptime", "?"))
 
-    grid = f"""
-    <div class="card">
-      <h2>CPU 占用</h2>
-      {cpu_chart}
-      <div class="meta">load: {load_txt} &nbsp; cores: {cores_txt}</div>
-    </div>
-    <div class="card">
-      <h2>内存</h2>
-      {mem_chart}
-      <div class="meta">{mem_meta}</div>
-    </div>
-    <div class="card">
-      <h2>温度 (°C)</h2>
-      {temp_chart}
-      <div class="meta">{temp_meta}</div>
-    </div>
-    <div class="card">
-      <h2>网络吞吐 (KB/s)</h2>
-      {net_chart}
-      <div class="meta">{net_meta}</div>
-    </div>
-    <div class="card wide">
-      <h2>磁盘</h2>
-      {disks_html}
-    </div>
-    <div class="card wide">
-      <h2>Top 进程（按 CPU%）</h2>
-      <table>
-        <thead><tr><th>PID</th><th>用户</th><th>命令</th><th>CPU%</th><th>MEM%</th></tr></thead>
-        <tbody>{procs_html}</tbody>
-      </table>
-    </div>"""
+    cpu_pill = f"cpu={cpu:.1f}%" if isinstance(cpu, (int, float)) else "cpu=?"
+    mem_pill = f"mem={mem:.1f}%" if isinstance(mem, (int, float)) else "mem=?"
+    temp_pill = f"temp={temp:.1f}C" if isinstance(temp, (int, float)) else "temp=?"
+
+    grid = _render_panel_grid(panel_list, snap, hist)
 
     header = f"""
 <header>
@@ -263,13 +211,16 @@ def render_dashboard_html(
   <div class="pills">
     <span class="pill">host={host}</span>
     <span class="pill">ip={ip}</span>
-    <span class="pill">{cpu_pill}</span>
-    <span class="pill">{mem_pill}</span>
-    <span class="pill">{temp_pill}</span>
+    <span class="pill">{_esc(cpu_pill)}</span>
+    <span class="pill">{_esc(mem_pill)}</span>
+    <span class="pill">{_esc(temp_pill)}</span>
     <span class="pill">up={uptime}</span>
   </div>
 </header>
 <main><div class="grid">{grid}</div></main>"""
+
+    # Taller canvas when users add many panels (cheap PNG capture).
+    design_h = max(DESIGN_HEIGHT, 180 + len(panel_list) * 120)
 
     base_css = """
 *{{box-sizing:border-box;margin:0;padding:0}}
@@ -284,6 +235,7 @@ main{{padding:12px 16px}}
 .card h2{{font-size:15px;font-weight:700;border-bottom:1px solid #111;padding-bottom:4px;margin-bottom:8px}}
 .card.wide{{grid-column:span 2}}
 .meta{{font-size:12px;font-family:monospace;color:#333;margin-top:6px;border-top:1px solid #ddd;padding-top:6px}}
+.textval{{font-size:18px;font-family:monospace;font-weight:700;margin:8px 0;word-break:break-word}}
 svg{{display:block;width:100%;height:auto}}
 .disk{{margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid #ddd}}
 .disk:last-child{{border-bottom:0;padding-bottom:0;margin-bottom:0}}
@@ -299,14 +251,14 @@ td:nth-child(4),td:nth-child(5),th:nth-child(4),th:nth-child(5){{text-align:righ
 """.format(design_w=DESIGN_WIDTH)
 
     if fit_viewport:
-        scale = min(width / DESIGN_WIDTH, height / DESIGN_HEIGHT)
+        scale = min(width / DESIGN_WIDTH, height / design_h)
         shell_css = (
             f"html,body{{width:{width}px;height:{height}px;overflow:hidden;background:#fff}}\n"
             f"body{{display:flex;justify-content:center;align-items:flex-start;"
             f"color:#111;font-family:Georgia,\"Times New Roman\",serif;font-size:15px;line-height:1.4}}\n"
             f"#page{{transform:scale({scale:.6f});transform-origin:top center}}\n"
         )
-        viewport = f'width={width},height={height},user-scalable=no'
+        viewport = f"width={width},height={height},user-scalable=no"
     else:
         shell_css = (
             "html,body{background:#fff;margin:0;padding:0}\n"
@@ -341,8 +293,8 @@ def _render_disks(disks: Iterable[dict]) -> str:
         pct = float(d.get("percent") or 0)
         parts.append(
             f'<div class="disk"><div class="row">'
-            f'<span>{mount} ({fstype})</span>'
-            f'<span>{human_bytes(d.get("used"))} / {human_bytes(d.get("total"))} · {pct:.1f}%</span>'
+            f"<span>{mount} ({fstype})</span>"
+            f"<span>{human_bytes(d.get('used'))} / {human_bytes(d.get('total'))} · {pct:.1f}%</span>"
             f'</div><div class="bar"><i style="width:{pct:.1f}%"></i></div></div>'
         )
     return "\n".join(parts)
