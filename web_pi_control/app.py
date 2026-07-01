@@ -35,6 +35,8 @@ from fastapi.staticfiles import StaticFiles
 from pi_remote_core import config, system_info
 from pi_remote_core.command_buttons import add_recent, load_state, promote_recent, save_buttons
 from pi_remote_core.commands import CommandHandler
+from pi_remote_core.monitor_panels import load_panels, save_panels
+from pi_remote_core.panel_extractors import panel_snapshot
 
 from .auth import COOKIE_NAME, make_token, verify_token
 from .kindle import (
@@ -65,7 +67,10 @@ async def _history_sampler() -> None:
     """Periodically push monitor_snapshot() onto the ring buffer."""
     while True:
         try:
-            _history.append(system_info.monitor_snapshot())
+            snap = system_info.monitor_snapshot()
+            snap = dict(snap)
+            snap["panels"] = panel_snapshot(snap, load_panels())
+            _history.append(snap)
         except Exception:  # pylint: disable=broad-except
             log.exception("monitor sampler failed")
         await asyncio.sleep(config.STATUS_INTERVAL_SECONDS)
@@ -186,9 +191,9 @@ async def api_monitor(history: int = 0):
     array containing up to that many recent samples (oldest first) — used by
     the Kindle/Lite renderer so its charts have a real line on first paint.
     """
-    snap = system_info.monitor_snapshot()
+    snap = dict(system_info.monitor_snapshot())
+    snap["panels"] = panel_snapshot(snap, load_panels())
     if history > 0:
-        snap = dict(snap)
         snap["history"] = list(_history)[-history:]
     return snap
 
@@ -198,13 +203,31 @@ async def api_monitor_stream():
     async def gen():
         try:
             while True:
-                snap = system_info.monitor_snapshot()
+                snap = dict(system_info.monitor_snapshot())
+                snap["panels"] = panel_snapshot(snap, load_panels())
                 yield f"data: {json.dumps(snap, default=str)}\n\n"
                 await asyncio.sleep(config.STATUS_INTERVAL_SECONDS)
         except asyncio.CancelledError:  # pragma: no cover
             return
 
     return StreamingResponse(gen(), media_type="text/event-stream")
+
+
+@app.get("/api/monitor-panels")
+async def api_get_monitor_panels():
+    return {"panels": load_panels()}
+
+
+@app.put("/api/monitor-panels")
+async def api_put_monitor_panels(payload: dict, _: str = Depends(require_session)):
+    panels = (payload or {}).get("panels")
+    if not isinstance(panels, list):
+        raise HTTPException(status_code=400, detail="missing 'panels' array")
+    try:
+        saved = save_panels(panels)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"panels": saved}
 
 
 # --------------------------------------------------------------------------- #

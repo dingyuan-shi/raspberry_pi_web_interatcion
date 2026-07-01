@@ -6,7 +6,16 @@
 
 ### 1. 局域网监控
 
-打开首页即可看到实时仪表盘（CPU / 内存 / 温度 / 网络 / 磁盘 / Top 进程），Chart.js 折线图 + SSE 推送，适合电脑和现代浏览器。
+打开首页即可看到实时仪表盘，Chart.js 折线图 + SSE 推送，适合电脑和现代浏览器。
+
+- **默认面板**：CPU、内存、温度、网络、磁盘、Top 进程
+- **可自定义**：登录后点击「管理面板」，可添加 / 编辑 / 删除 / 复制 / 拖动排序
+- **统一模型**：每个面板 = **提炼方式** + **后台命令** + **展示方式**
+  - **内置**：`cpu`、`memory`、`temp`、`network`、`disks`、`procs`（由服务端采集）
+  - **Shell**：任意 shell 命令，服务端定期后台执行，再用「提取首个数字 / 正则 / 全文」提炼结果
+  - **展示**：折线图、纯文本、磁盘条、进程表
+
+配置保存在 `{DATA_DIR}/monitor_panels.json`（默认 `/opt/pi-remote/data/`，安装时不会被覆盖）。
 
 ```
 http://<树莓派IP>:8080/
@@ -20,8 +29,9 @@ http://<树莓派IP>:8080/
 
 - **命令**：文本协议（`status`、`gpio:17:toggle`、`shell:vcgencmd measure_temp` 等），方便脚本和二次开发
 - **交互终端**：xterm.js + WebSocket PTY，体验接近 SSH
+- **自定义按钮**：命令页「管理」可添加固定命令或带 `${参数}` 的模板，支持拖动排序、复制、最近使用记录
 
-协议集中在 `pi_remote_core/commands.py`，新增命令只需改一处。
+协议集中在 `pi_remote_core/commands.py`，新增命令只需改一处。按钮配置保存在 `{DATA_DIR}/command_buttons.json`。
 
 ![快捷命令](docs/screenshots/cmd.png)
 
@@ -90,12 +100,58 @@ sudo USE_PIWHEELS=1 ./install.sh
 /api/cheap.png          cheap 图源
 /api/status             状态 JSON
 /api/status/stream      状态 SSE
-/api/monitor            详细监控（?history=N）
+/api/monitor            详细监控（?history=N，含 panels 自定义面板数据）
 /api/monitor/stream     监控 SSE
+GET  /api/monitor-panels   监控面板配置（公开）
+PUT  /api/monitor-panels   保存面板配置（需登录）
+GET  /api/command-buttons  命令按钮配置（需登录）
+PUT  /api/command-buttons  保存命令按钮（需登录）
 POST /login             Deploy 登录
 POST /api/command       执行命令（需登录）
 WS   /api/shell         交互终端（需登录）
 ```
+
+---
+
+## 自定义监控面板
+
+登录后，监控页右上角 **管理面板**：
+
+| 字段 | 说明 |
+|------|------|
+| 提炼方式 | `builtin`（内置指标）或 `shell`（后台 shell） |
+| 命令 | 内置键名，或 shell 命令（如 `vcgencmd measure_temp`） |
+| 结果提炼 | Shell 专用：`float`（首个数字）、`regex`（正则捕获组 1）、`text`（全文） |
+| 展示方式 | `chart` 折线图、`text` 文本、`disks` 磁盘条、`table` 进程表 |
+
+**Shell 面板示例**（GPU 温度）：
+
+| 标题 | 提炼方式 | 命令 | 结果提炼 | 正则 | 展示 |
+|------|----------|------|----------|------|------|
+| GPU 温度 | shell | `vcgencmd measure_temp` | regex | `temp=([\d.]+)` | chart（单位 °C） |
+
+**内置面板示例**：
+
+| 命令键 | 展示 | 说明 |
+|--------|------|------|
+| `cpu` | chart | CPU 占用 %，附 load / 各核占用 |
+| `memory` | chart | 内存占用 %，附 swap |
+| `temp` | chart | CPU 温度（sysfs / vcgencmd） |
+| `network` | chart | 网络吞吐 KB/s |
+| `disks` | disks | 各分区使用率条 |
+| `procs` | table | Top 进程表 |
+
+拖动左侧 `≡` 可调整面板顺序；「复制」可快速基于现有面板新建。
+
+---
+
+## 自定义命令按钮
+
+登录后，命令页 **管理**：
+
+- **命令**：固定内容，点击即执行
+- **命令模板**：命令中含 `${参数名}`，每次执行前弹窗填参；最近 10 次可「存为命令」
+- 支持拖动排序、复制、危险操作确认
 
 ---
 
@@ -130,6 +186,14 @@ curl -b jar.txt -H 'Content-Type: application/json' \
 | `WEB_SESSION_HOURS` | `12` | 会话有效期 |
 | `PI_REMOTE_GPIO_PINS` | `17,18,22,...` | GPIO 白名单 |
 | `STATUS_INTERVAL` | `5` | SSE 间隔（秒） |
+| `PI_REMOTE_DATA_DIR` | `/opt/pi-remote/data` | 持久化数据目录（面板、按钮 JSON） |
+
+持久化文件（安装升级时 `install.sh` 会保留 `data/` 目录）：
+
+| 文件 | 内容 |
+|------|------|
+| `command_buttons.json` | 快捷命令 / 模板 / 最近使用 |
+| `monitor_panels.json` | 监控面板布局与提炼配置 |
 
 ---
 
@@ -149,6 +213,9 @@ curl -b jar.txt -H 'Content-Type: application/json' \
 raspberry_pi_web_interaction/
 ├── docs/screenshots/        # README 截图（watch / lite / cmd / shell）
 ├── pi_remote_core/          # 命令协议、系统信息采集、配置
+│   ├── command_buttons.py   # 命令按钮持久化
+│   ├── monitor_panels.py    # 监控面板持久化
+│   └── panel_extractors.py  # 面板数据提炼（builtin + shell）
 ├── web_pi_control/          # FastAPI + 前端静态文件
 │   ├── kindle_html.py       # lite / cheap 共用仪表盘模板
 │   └── static/              # 主页 index.html / app.js / style.css

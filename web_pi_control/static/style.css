@@ -225,6 +225,19 @@ button.btn-sm { padding: 6px 12px; font-size: 13px; font-weight: 500; }
   font-weight: 600;
 }
 .section-hint { font-size: 12px; margin: 0 0 8px; }
+.monitor-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}
+.panel-text {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 22px;
+  font-weight: 600;
+  margin: 8px 0;
+  word-break: break-word;
+}
+#panel-edit-form select { margin-bottom: 12px; }
 .manage-section-title {
   font-size: 14px;
   margin: 12px 0 8px;
