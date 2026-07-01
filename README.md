@@ -46,7 +46,7 @@ http://<树莓派IP>:8080/
 | `/lite` | 电脑 / 老浏览器 | HTML + SVG 矢量图，折线清晰 |
 | `/cheap` | Kindle、极老设备 | 自动刷新的 PNG（默认 Paperwhite 5：1236×1648） |
 
-两者共用 `web_pi_control/kindle_html.py` 一套模板；改这个文件，`/lite` 和 `/cheap` 同步更新。
+两者共用 `web_pi_control/kindle_html.py` 一套模板，并读取与主页相同的 `monitor_panels.json` 自定义面板配置；改面板后 `/`、`/lite`、`/cheap` 同步更新。
 
 ```
 http://<树莓派IP>:8080/lite     # 廉价监控（SVG）

@@ -376,17 +376,21 @@ async def render_lite_internal(
     h: int = CHEAP_DEFAULT_HEIGHT,
 ):
     """Scaled lite dashboard — Chromium screenshot source for /api/cheap.png."""
-    snap = system_info.monitor_snapshot()
+    panels = load_panels()
+    snap = dict(system_info.monitor_snapshot())
+    snap["panels"] = panel_snapshot(snap, panels)
     return render_dashboard_html(
-        snap, list(_history), width=w, height=h, fit_viewport=True
+        snap, list(_history), panels=panels, width=w, height=h, fit_viewport=True
     )
 
 
 @app.get("/lite", response_class=HTMLResponse)
 async def lite_page(refresh: int = 60):
     """Lite dashboard — live HTML + SVG (sharp lines on desktop browsers)."""
-    snap = system_info.monitor_snapshot()
-    page = render_dashboard_html(snap, list(_history), fit_viewport=False)
+    panels = load_panels()
+    snap = dict(system_info.monitor_snapshot())
+    snap["panels"] = panel_snapshot(snap, panels)
+    page = render_dashboard_html(snap, list(_history), panels=panels, fit_viewport=False)
     return wrap_with_refresh(page, refresh)
 
 
